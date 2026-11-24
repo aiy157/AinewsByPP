@@ -9,6 +9,7 @@ Wired directly to `pipeline.prompts`:
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any, Dict, List, Set, Tuple
@@ -17,7 +18,7 @@ from pipeline.ai_processor.batch_client import (
     AnthropicBatchRunner,
     BatchExecutionResult,
 )
-from pipeline.config import PipelineConfig
+from pipeline.config import PROJECT_ROOT, PipelineConfig
 from pipeline.prompts import (
     PriorMidweekTopic,
     build_stage2_message_params,
@@ -100,6 +101,14 @@ def run_stage2_opus(
     raw_output = exec_result.outputs.get(custom_id, "")
     if not raw_output:
         raise RuntimeError("[Stage2-Opus] Received empty output from Anthropic API.")
+
+    # Save raw paid Stage 2 output immediately to gitignored pipeline/data/
+    try:
+        dump_dir = PROJECT_ROOT / "pipeline" / "data"
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        (dump_dir / "last_stage2_raw.json").write_text(raw_output, encoding="utf-8")
+    except Exception:
+        pass
 
     validated, audit = parse_and_audit_stage2(
         raw_output,

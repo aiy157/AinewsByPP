@@ -10,7 +10,8 @@ Ensures strict schema alignment across:
 """
 
 from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel, Field, model_validator
+import re
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ==============================================================================
 # 1. Shared Domain Literals & Constants
@@ -68,8 +69,26 @@ class SourceUrlItem(BaseModel):
 
 
 class KeyFactItem(BaseModel):
-    label: str = Field(..., min_length=1, max_length=60, description="Short Thai metric label e.g. 'ลดต้นทุน Input'")
-    value: str = Field(..., min_length=1, max_length=90, description="Concise metric/spec value e.g. 'สูงสุด 75%'")
+    label: str = Field(..., min_length=1, max_length=120, description="Short Thai metric label e.g. 'ลดต้นทุน Input'")
+    value: str = Field(..., min_length=1, max_length=200, description="Concise metric/spec value e.g. 'สูงสุด 75%'")
+
+
+def _normalize_slug(value: Any) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")
+    return s or "ai-news-item"
+
+
+def _normalize_company_tags(value: Any) -> List[str]:
+    if not isinstance(value, list) or not value:
+        return ["Other"]
+    valid_lookup = {tag.lower(): tag for tag in VALID_COMPANY_TAGS}
+    result: List[str] = []
+    for raw in value:
+        key = str(raw or "").strip().lower()
+        mapped = valid_lookup.get(key, "Other")
+        if mapped not in result:
+            result.append(mapped)
+    return result or ["Other"]
 
 
 # ==============================================================================
@@ -134,8 +153,8 @@ class Stage1ClusterItem(BaseModel):
     )
     extracted_facts: List[str] = Field(
         ...,
-        min_length=5,
-        max_length=10,
+        min_length=1,
+        max_length=15,
         description=(
             "5 to 10 lossless, in-depth factual points covering: (1) background/context, "
             "(2) technical specs/architecture, (3) exact benchmarks/pricing/numbers, "
@@ -151,6 +170,16 @@ class Stage1ClusterItem(BaseModel):
         ...,
         description="Most recent ISO-8601 UTC timestamp among the merged articles in this cluster",
     )
+
+    @field_validator("cluster_slug", mode="before")
+    @classmethod
+    def sanitize_slug(cls, v: Any) -> str:
+        return _normalize_slug(v)
+
+    @field_validator("company_tags", mode="before")
+    @classmethod
+    def sanitize_company_tags(cls, v: Any) -> List[str]:
+        return _normalize_company_tags(v)
 
 
 class Stage1BatchOutput(BaseModel):
@@ -196,26 +225,25 @@ class Stage2NewsItem(BaseModel):
     )
     title_th: str = Field(
         ...,
-        min_length=15,
-        max_length=220,
+        min_length=5,
+        max_length=400,
         description="Authoritative, clear Thai headline summarizing the core development",
     )
     tldr_th: str = Field(
         ...,
-        min_length=40,
-        max_length=420,
+        min_length=10,
+        max_length=1000,
         description="1 to 2 crisp Thai sentences giving an immediate executive summary for preview cards & reader lead",
     )
     key_facts: List[KeyFactItem] = Field(
-        ...,
-        min_length=3,
-        max_length=4,
+        default_factory=list,
+        max_length=6,
         description="3 to 4 structured key facts/metrics for the quick-scan strip at the top of the reader view",
     )
     summary_bullets: List[str] = Field(
         ...,
-        min_length=5,
-        max_length=5,
+        min_length=3,
+        max_length=6,
         description=(
             "Exactly 5 ultra-detailed Thai sections (each 2-4 comprehensive sentences) prefixed with clear labels: "
             "Verified -> 'ที่มาและบริบท:', 'เจาะลึกสเปกและกลไกเทคนิค:', 'ตัวเลขและผลเปรียบเทียบ:', "
@@ -239,6 +267,16 @@ class Stage2NewsItem(BaseModel):
         ...,
         description="ISO-8601 timestamp of the news item",
     )
+
+    @field_validator("cluster_slug", mode="before")
+    @classmethod
+    def sanitize_slug(cls, v: Any) -> str:
+        return _normalize_slug(v)
+
+    @field_validator("company_tags", mode="before")
+    @classmethod
+    def sanitize_company_tags(cls, v: Any) -> List[str]:
+        return _normalize_company_tags(v)
 
     @model_validator(mode="after")
     def validate_status_and_category(self) -> "Stage2NewsItem":

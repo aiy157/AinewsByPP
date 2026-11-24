@@ -561,11 +561,14 @@ def build_stage1_message_params(
     max_tokens: int = 16384,
     enable_cache: bool = True,
 ) -> Dict[str, Any]:
-    """Builds ready-to-send Anthropic Messages / Batch `params` dict for Stage 1."""
+    """
+    Builds ready-to-send Anthropic Messages / Batch `params` dict for Stage 1 (Claude 5.5 Haiku).
+    Explicitly disables thinking (`type: 'disabled'`) and omits deprecated `temperature`.
+    """
     return {
         "model": model,
         "max_tokens": max_tokens,
-        "temperature": 0.0,
+        "thinking": {"type": "disabled"},
         "system": build_stage1_system_blocks(enable_cache=enable_cache),
         "messages": [
             {
@@ -589,24 +592,20 @@ def build_stage2_message_params(
     window_end_ict: str = "",
     prior_midweek_topics: Optional[Sequence[Union[PriorMidweekTopic, Dict[str, Any]]]] = None,
     model: str = DEFAULT_STAGE2_MODEL,
-    max_tokens: int = 16000,
+    max_tokens: int = 28000,
     thinking_budget_tokens: int = DEFAULT_STAGE2_THINKING_BUDGET,
+    effort: str = "medium",
     enable_cache: bool = True,
 ) -> Dict[str, Any]:
     """
-    Builds ready-to-send Anthropic Messages / Batch `params` dict for Stage 2.
-    Enforces `temperature=1.0` and `max_tokens > thinking_budget_tokens` as required
-    by Anthropic Extended Thinking.
+    Builds ready-to-send Anthropic Messages / Batch `params` dict for Stage 2 (Claude 5.5 Opus).
+    Uses Claude 5.5 native Adaptive Thinking (`thinking: {"type": "adaptive"}`) with
+    `output_config: {"effort": effort}` (defaults to "medium") and omits deprecated `temperature`
+    and legacy `budget_tokens`.
     """
-    if thinking_budget_tokens > 0 and max_tokens <= thinking_budget_tokens:
-        raise ValueError(
-            f"max_tokens ({max_tokens}) must exceed thinking_budget_tokens ({thinking_budget_tokens})."
-        )
-
     params: Dict[str, Any] = {
         "model": model,
         "max_tokens": max_tokens,
-        "temperature": 1.0 if thinking_budget_tokens > 0 else 0.0,
         "system": build_stage2_system_blocks(enable_cache=enable_cache),
         "messages": [
             {
@@ -622,11 +621,19 @@ def build_stage2_message_params(
             }
         ],
     }
+
     if thinking_budget_tokens > 0:
-        params["thinking"] = {
-            "type": "enabled",
-            "budget_tokens": thinking_budget_tokens,
-        }
+        if "5-" in model or "4-6" in model:
+            params["thinking"] = {"type": "adaptive"}
+            params["output_config"] = {"effort": effort}
+        else:
+            params["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": thinking_budget_tokens,
+            }
+    else:
+        params["thinking"] = {"type": "disabled"}
+
     return params
 
 

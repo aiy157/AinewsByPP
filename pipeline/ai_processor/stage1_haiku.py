@@ -17,7 +17,7 @@ from pipeline.ai_processor.batch_client import (
     AnthropicBatchRunner,
     BatchExecutionResult,
 )
-from pipeline.config import PipelineConfig, estimate_tokens
+from pipeline.config import PROJECT_ROOT, PipelineConfig, estimate_tokens
 from pipeline.prompts import (
     build_stage1_message_params,
     parse_and_audit_stage1,
@@ -47,14 +47,51 @@ def _is_official_domain(url: str) -> bool:
     return False
 
 
+def _recover_truncated_stage1_json(raw_text: str) -> str:
+    """
+    Deterministic safety net if Stage 1 output ever hits max_tokens mid-cluster:
+    rescues every complete cluster object before the truncation point by closing
+    the JSON array/object cleanly without calling any LLM.
+    """
+    cleaned = raw_text.strip()
+    start = cleaned.find("{")
+    if start == -1:
+        return cleaned
+    cleaned = cleaned[start:]
+
+    # Try normal parse first
+    try:
+        json.loads(cleaned)
+        return cleaned
+    except json.JSONDecodeError:
+        pass
+
+    # Find last complete cluster boundary `},{"cluster_slug":` or `}` inside clusters array
+    marker = cleaned.rfind('},{"cluster_slug"')
+    if marker != -1:
+        rescued = cleaned[: marker + 1] + "]}"
+        try:
+            json.loads(rescued)
+            logger.warning(
+                "[Stage1-Haiku] Rescued complete clusters from truncated JSON output deterministically."
+            )
+            return rescued
+        except json.JSONDecodeError:
+            pass
+
+    return cleaned
+
+
 def build_token_budgeted_chunks(
     items: List[RawScrapedItem],
     status: NewsStatus,
     max_input_tokens: int = 100_000,
+    max_items_per_chunk: int = 30,
 ) -> List[Tuple[str, NewsStatus, List[RawScrapedItem]]]:
     """
-    Splits a single status stream into chunks staying safely below max_input_tokens
-    (reserving 15,000 tokens of headroom for system prompt & JSON formatting).
+    Splits a single status stream into chunks staying safely below BOTH max_input_tokens
+    (reserving 15,000 tokens headroom) AND max_items_per_chunk (30 items) so Stage 1's
+    lossless JSON output never truncates against max_tokens.
     """
     if not items:
         return []
@@ -68,7 +105,10 @@ def build_token_budgeted_chunks(
         serialized = json.dumps(item.model_dump(), ensure_ascii=False)
         item_tokens = estimate_tokens(serialized)
 
-        if current_batch and (current_tokens + item_tokens > effective_budget):
+        if current_batch and (
+            current_tokens + item_tokens > effective_budget
+            or len(current_batch) >= max_items_per_chunk
+        ):
             chunk_id = f"stage1-{status}-chunk-{len(chunks) + 1}"
             chunks.append((chunk_id, status, current_batch))
             current_batch = [item]
@@ -118,7 +158,7 @@ def run_stage1_haiku(
             chunk_index=idx,
             total_chunks=total_chunks,
             model=config.stage1_model,
-            max_tokens=16384,
+            max_tokens=32768,
             enable_cache=True,
         )
         batch_requests.append(
@@ -135,6 +175,17 @@ def run_stage1_haiku(
         stage_label="Stage1-Haiku",
     )
 
+    # Save raw paid Stage 1 outputs immediately to gitignored pipeline/data/
+    try:
+        dump_dir = PROJECT_ROOT / "pipeline" / "data"
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        (dump_dir / "last_stage1_raw.json").write_text(
+            json.dumps(exec_result.outputs, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
     validated_clusters: List[Stage1ClusterItem] = []
 
     for chunk_id, raw_output in exec_result.outputs.items():
@@ -143,7 +194,8 @@ def run_stage1_haiku(
         allowed_chunk_images: Set[str] = {it.image_url for it in chunk_items if it.image_url}
 
         try:
-            parsed, audit = parse_and_audit_stage1(raw_output, chunk_items)
+            safe_raw_output = _recover_truncated_stage1_json(raw_output)
+            parsed, audit = parse_and_audit_stage1(safe_raw_output, chunk_items)
 
             if audit.warnings:
                 for w in audit.warnings:

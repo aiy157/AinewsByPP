@@ -136,6 +136,7 @@ class AnthropicBatchRunner:
             time.sleep(poll_interval_seconds)
 
         # Harvest any succeeded batch items (prevents double-billing on partial completion)
+        errored_details: Dict[str, str] = {}
         if batch.processing_status == "ended":
             try:
                 for entry in self.client.messages.batches.results(batch.id):
@@ -145,6 +146,15 @@ class AnthropicBatchRunner:
                         result.outputs[cid] = extract_text_from_message_content(msg.content)
                         result.input_tokens += int(getattr(msg.usage, "input_tokens", 0) or 0)
                         result.output_tokens += int(getattr(msg.usage, "output_tokens", 0) or 0)
+                    elif entry.result.type == "errored":
+                        err_obj = getattr(entry.result, "error", None)
+                        errored_details[cid] = str(err_obj)
+                        logger.error(
+                            "[%s] Batch item custom_id=%s errored: %s",
+                            stage_label,
+                            cid,
+                            err_obj,
+                        )
                     else:
                         logger.warning(
                             "[%s] Batch item custom_id=%s ended with type=%s",
@@ -155,10 +165,19 @@ class AnthropicBatchRunner:
             except Exception as res_exc:
                 logger.warning("[%s] Could not stream partial batch results: %s", stage_label, res_exc)
 
-        # Determine if any custom_ids still need Standard API fallback
+        # Only trigger Option 3B Standard API Fallback for timed-out/canceled/expired items,
+        # NOT for 400 invalid_request_error payloads.
         missing_requests = {
-            cid: params for cid, params in request_map.items() if cid not in result.outputs
+            cid: params
+            for cid, params in request_map.items()
+            if cid not in result.outputs
+            and "invalid_request_error" not in errored_details.get(cid, "")
         }
+
+        if errored_details and not missing_requests and not result.outputs:
+            raise RuntimeError(
+                f"[{stage_label}] All batch requests rejected by Anthropic API: {errored_details}"
+            )
 
         if missing_requests:
             result.used_fallback = True
