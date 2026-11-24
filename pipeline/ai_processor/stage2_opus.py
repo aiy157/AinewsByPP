@@ -85,7 +85,7 @@ def run_stage2_opus(
         window_end_ict=window_end_ict,
         prior_midweek_topics=prior_topics,
         model=config.stage2_model,
-        max_tokens=28000,
+        max_tokens=40000,
         thinking_budget_tokens=config.stage2_thinking_budget,
         enable_cache=True,
     )
