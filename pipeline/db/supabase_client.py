@@ -33,7 +33,7 @@ class AinewsSupabaseClient:
         try:
             resp = (
                 self.client.table("news_items")
-                .select("cluster_slug, title_th, status, category, source_urls")
+                .select("cluster_slug, status, company_tags, title_th, tldr_th")
                 .eq("week_id", week_id)
                 .eq("batch_type", "midweek")
                 .execute()

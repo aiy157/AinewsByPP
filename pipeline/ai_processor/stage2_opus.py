@@ -1,32 +1,43 @@
 """
 Stage 2 Processor: claude-opus-5-5 (Extended Thinking: Medium / 4,000 tokens)
-  - Primary Role: Authoritative 5-Dimension Thai Editorial Summarization.
-  - Receives lossless Stage 1 clusters (~40k tokens) + Wednesday midweek headlines
-    (when running weekend cycle) to prevent cross-cycle repetition.
-  - Code-gates category rules (rumor => category=None) and image URL whitelisting.
+Wired directly to `pipeline.prompts`:
+  - Cache-friendly static system prompt (`cache_control: {"type": "ephemeral"}`)
+  - XML-sandboxed `<prior_midweek_topics>` & `<stage1_clusters>`
+  - Deterministic Gate 2 audit (`parse_and_audit_stage2`) checking provenance,
+    status isolation, 5-dimension Thai prefix contract, and zero Markdown leakage
 """
 
 from __future__ import annotations
 
-import json
 import logging
+import re
 from typing import Any, Dict, List, Set, Tuple
 
 from pipeline.ai_processor.batch_client import (
     AnthropicBatchRunner,
     BatchExecutionResult,
-    extract_json_payload,
 )
-from pipeline.ai_processor.prompts import STAGE2_SYSTEM_PROMPT
 from pipeline.config import PipelineConfig
+from pipeline.prompts import (
+    PriorMidweekTopic,
+    build_stage2_message_params,
+    parse_and_audit_stage2,
+)
 from pipeline.schemas import (
     BatchType,
     Stage1ClusterItem,
-    Stage2EditorialOutput,
     Stage2NewsItem,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_accidental_markdown(text: str) -> str:
+    """Deterministic plain-text cleanup if the model accidentally emitted bold/code markdown."""
+    cleaned = re.sub(r"\*\*([^*\n]+)\*\*", r"\1", text)
+    cleaned = re.sub(r"__([^_\n]+)__", r"\1", cleaned)
+    cleaned = re.sub(r"`([^`\n]+)`", r"\1", cleaned)
+    return cleaned.strip()
 
 
 def run_stage2_opus(
@@ -36,64 +47,51 @@ def run_stage2_opus(
     batch_type: BatchType,
     stage1_clusters: List[Stage1ClusterItem],
     midweek_published_headlines: List[Dict[str, Any]],
+    window_start_ict: str = "",
+    window_end_ict: str = "",
 ) -> Tuple[List[Stage2NewsItem], BatchExecutionResult]:
     """
     Executes Stage 2 (claude-opus-5-5 with Extended Thinking budget=4000) via
-    Anthropic Message Batches API with Option 3B fallback.
+    Anthropic Message Batches API using `pipeline.prompts.build_stage2_message_params`,
+    then audits and code-gates all curated Thai briefs via `parse_and_audit_stage2`.
     """
     if not stage1_clusters:
         logger.warning("[Stage 2] No Stage 1 clusters available. Skipping Opus 5.5.")
         return [], BatchExecutionResult()
 
-    # Build strict whitelists from Stage 1 so Stage 2 cannot invent fake images or flip status
-    valid_image_urls: Set[str] = {
-        c.image_url for c in stage1_clusters if c.image_url
-    }
+    # Convert midweek DB rows into typed PriorMidweekTopic context for weekend dedup
+    prior_topics: List[PriorMidweekTopic] = []
+    if batch_type == "weekend" and midweek_published_headlines:
+        for row in midweek_published_headlines:
+            try:
+                prior_topics.append(
+                    PriorMidweekTopic(
+                        cluster_slug=str(row.get("cluster_slug") or ""),
+                        status=row.get("status") if row.get("status") in ("verified", "rumor") else "verified",
+                        company_tags=list(row.get("company_tags") or []),
+                        title_th=str(row.get("title_th") or ""),
+                        tldr_th=str(row.get("tldr_th") or ""),
+                    )
+                )
+            except Exception:
+                continue
 
-    verified_clusters = [c.model_dump() for c in stage1_clusters if c.status == "verified"]
-    rumor_clusters = [c.model_dump() for c in stage1_clusters if c.status == "rumor"]
-
-    user_payload = {
-        "week_id": week_id,
-        "batch_type": batch_type,
-        "midweek_published_headlines": (
-            midweek_published_headlines if batch_type == "weekend" else []
-        ),
-        "verified_clusters_count": len(verified_clusters),
-        "rumor_clusters_count": len(rumor_clusters),
-        "verified_clusters": verified_clusters,
-        "rumor_clusters": rumor_clusters,
-    }
+    params = build_stage2_message_params(
+        week_id=week_id,
+        batch_type=batch_type,
+        stage1_clusters=stage1_clusters,
+        window_start_ict=window_start_ict,
+        window_end_ict=window_end_ict,
+        prior_midweek_topics=prior_topics,
+        model=config.stage2_model,
+        max_tokens=28000,
+        thinking_budget_tokens=config.stage2_thinking_budget,
+        enable_cache=True,
+    )
 
     custom_id = f"stage2-opus-{week_id}-{batch_type}"
-    batch_request = [
-        {
-            "custom_id": custom_id,
-            "params": {
-                "model": config.stage2_model,
-                "max_tokens": 32000,
-                "thinking": {
-                    "type": "enabled",
-                    "budget_tokens": config.stage2_thinking_budget,
-                },
-                "system": STAGE2_SYSTEM_PROMPT,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Curate and write the ultra-detailed 5-dimension Thai editorial briefs for "
-                            f"week_id='{week_id}', batch_type='{batch_type}'. "
-                            f"Follow all JSON schema and 5-section requirements strictly.\n\n"
-                            f"{json.dumps(user_payload, ensure_ascii=False)}"
-                        ),
-                    }
-                ],
-            },
-        }
-    ]
-
     exec_result = runner.execute_batch_with_fallback(
-        requests=batch_request,
+        requests=[{"custom_id": custom_id, "params": params}],
         timeout_seconds=config.batch_stage2_timeout_seconds,
         poll_interval_seconds=config.batch_poll_interval_seconds,
         stage_label="Stage2-Opus",
@@ -103,14 +101,27 @@ def run_stage2_opus(
     if not raw_output:
         raise RuntimeError("[Stage2-Opus] Received empty output from Anthropic API.")
 
-    parsed_dict = extract_json_payload(raw_output)
-    # Inject canonical week_id/batch_type if omitted
-    parsed_dict.setdefault("week_id", week_id)
-    parsed_dict.setdefault("batch_type", batch_type)
+    validated, audit = parse_and_audit_stage2(
+        raw_output,
+        stage1_clusters,
+        expected_week_id=week_id,
+        expected_batch_type=batch_type,
+    )
 
-    validated = Stage2EditorialOutput.model_validate(parsed_dict)
+    if audit.warnings:
+        for w in audit.warnings:
+            logger.warning("[Stage2-Audit] WARN: %s", w)
+    if not audit.is_valid:
+        for e in audit.errors:
+            logger.warning("[Stage2-Audit] ERROR (applying deterministic code-gates): %s", e)
 
-    # Code-gate final output items
+    # Whitelists from Stage 1 for strict provenance code-gating
+    valid_image_urls: Set[str] = {c.image_url for c in stage1_clusters if c.image_url}
+    url_to_status: Dict[str, str] = {}
+    for c in stage1_clusters:
+        for src in c.source_urls:
+            url_to_status[src.url] = c.status
+
     final_items: List[Stage2NewsItem] = []
     seen_slugs: Set[str] = set()
 
@@ -119,9 +130,33 @@ def run_stage2_opus(
             continue
         seen_slugs.add(item.cluster_slug)
 
+        # Keep only verbatim source URLs belonging to the same status
+        clean_sources = [
+            src
+            for src in item.source_urls
+            if src.url in url_to_status and url_to_status[src.url] == item.status
+        ]
+        if not clean_sources:
+            logger.warning("[Stage2-CodeGate] Dropping '%s' due to zero valid matching source_urls.", item.cluster_slug)
+            continue
+
         safe_image_url = item.image_url if item.image_url in valid_image_urls else None
         safe_image_credit = item.image_credit if safe_image_url else None
         enforced_category = None if item.status == "rumor" else item.category
+
+        # Clean any accidental markdown tokens so UI plain-text rendering stays pristine
+        clean_title = _strip_accidental_markdown(item.title_th)
+        clean_tldr = _strip_accidental_markdown(item.tldr_th)
+        clean_bullets = [_strip_accidental_markdown(b) for b in item.summary_bullets]
+        clean_facts = [
+            kf.model_copy(
+                update={
+                    "label": _strip_accidental_markdown(kf.label),
+                    "value": _strip_accidental_markdown(kf.value),
+                }
+            )
+            for kf in item.key_facts
+        ]
 
         final_items.append(
             item.model_copy(
@@ -129,17 +164,23 @@ def run_stage2_opus(
                     "category": enforced_category,
                     "image_url": safe_image_url,
                     "image_credit": safe_image_credit,
+                    "source_urls": clean_sources,
+                    "title_th": clean_title,
+                    "tldr_th": clean_tldr,
+                    "summary_bullets": clean_bullets,
+                    "key_facts": clean_facts,
                 }
             )
         )
 
     logger.info(
-        "[Stage2-Opus] Curated %d final Thai briefs (verified=%d, rumor=%d, in=%d, out=%d, fallback=%s).",
+        "[Stage2-Opus] Curated %d final Thai briefs (verified=%d, rumor=%d, in=%d, out=%d, fallback=%s, audit_ok=%s).",
         len(final_items),
         sum(1 for i in final_items if i.status == "verified"),
         sum(1 for i in final_items if i.status == "rumor"),
         exec_result.input_tokens,
         exec_result.output_tokens,
         exec_result.used_fallback,
+        audit.is_valid,
     )
     return final_items, exec_result

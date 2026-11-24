@@ -1,8 +1,9 @@
 """
 Stage 1 Processor: claude-haiku-5-5 (Thinking: Disabled)
-  - Strictly separates 'verified' and 'rumor' chunks so statuses can NEVER contaminate each other.
-  - Enforces <= 100,000 input tokens per chunk inside a single Anthropic Message Batch.
-  - Code-gates status integrity, official domain flags, and image URL whitelisting.
+Wired directly to `pipeline.prompts`:
+  - Cache-friendly static system prompt (`cache_control: {"type": "ephemeral"}`)
+  - XML-sandboxed `<untrusted_raw_articles>` with prompt-injection escaping
+  - Deterministic Gate 1 audit (`parse_and_audit_stage1`) + code-gated provenance checks
 """
 
 from __future__ import annotations
@@ -15,14 +16,15 @@ from urllib.parse import urlparse
 from pipeline.ai_processor.batch_client import (
     AnthropicBatchRunner,
     BatchExecutionResult,
-    extract_json_payload,
 )
-from pipeline.ai_processor.prompts import STAGE1_SYSTEM_PROMPT
 from pipeline.config import PipelineConfig, estimate_tokens
+from pipeline.prompts import (
+    build_stage1_message_params,
+    parse_and_audit_stage1,
+)
 from pipeline.schemas import (
     NewsStatus,
     RawScrapedItem,
-    Stage1BatchOutput,
     Stage1ClusterItem,
 )
 from pipeline.sources import OFFICIAL_DOMAIN_SUFFIXES
@@ -90,7 +92,8 @@ def run_stage1_haiku(
 ) -> Tuple[List[Stage1ClusterItem], BatchExecutionResult]:
     """
     Executes Stage 1 (claude-haiku-5-5, thinking disabled) across all token-budgeted chunks
-    in one Message Batch, then strictly validates and code-gates all returned clusters.
+    in one Anthropic Message Batch using `pipeline.prompts.build_stage1_message_params`,
+    then validates & audits every returned cluster via `parse_and_audit_stage1`.
     """
     verified_chunks = build_token_budgeted_chunks(
         verified_items, status="verified", max_input_tokens=config.stage1_max_input_tokens_per_chunk
@@ -104,46 +107,24 @@ def run_stage1_haiku(
         logger.warning("[Stage 1] No raw items to process.")
         return [], BatchExecutionResult()
 
-    # Whitelist of real scraped image URLs to prevent LLM hallucination of fake images
-    valid_scraped_images: Set[str] = {
-        item.image_url
-        for item in (verified_items + rumor_items)
-        if item.image_url
-    }
-
+    total_chunks = len(all_chunks)
     batch_requests: List[Dict[str, Any]] = []
-    chunk_status_map: Dict[str, NewsStatus] = {}
+    chunk_meta_map: Dict[str, Tuple[NewsStatus, List[RawScrapedItem]]] = {}
 
-    for chunk_id, chunk_status, chunk_items in all_chunks:
-        chunk_status_map[chunk_id] = chunk_status
-        payload_json = json.dumps(
-            {
-                "locked_status": chunk_status,
-                "item_count": len(chunk_items),
-                "items": [it.model_dump() for it in chunk_items],
-            },
-            ensure_ascii=False,
+    for idx, (chunk_id, chunk_status, chunk_items) in enumerate(all_chunks, start=1):
+        chunk_meta_map[chunk_id] = (chunk_status, chunk_items)
+        params = build_stage1_message_params(
+            raw_items=chunk_items,
+            chunk_index=idx,
+            total_chunks=total_chunks,
+            model=config.stage1_model,
+            max_tokens=16384,
+            enable_cache=True,
         )
-
         batch_requests.append(
             {
                 "custom_id": chunk_id,
-                "params": {
-                    "model": config.stage1_model,
-                    "max_tokens": 16000,
-                    "temperature": 0.1,
-                    "system": STAGE1_SYSTEM_PROMPT,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": (
-                                f"Process the following {len(chunk_items)} raw items with locked status='{chunk_status}'. "
-                                f"Cluster duplicates, merge source URLs, pick the best real image_url from the input if available, "
-                                f"and extract lossless detailed technical facts without losing numbers:\n\n{payload_json}"
-                            ),
-                        }
-                    ],
-                },
+                "params": params,
             }
         )
 
@@ -157,34 +138,46 @@ def run_stage1_haiku(
     validated_clusters: List[Stage1ClusterItem] = []
 
     for chunk_id, raw_output in exec_result.outputs.items():
-        expected_status = chunk_status_map[chunk_id]
+        expected_status, chunk_items = chunk_meta_map[chunk_id]
+        allowed_chunk_urls: Set[str] = {it.url for it in chunk_items}
+        allowed_chunk_images: Set[str] = {it.image_url for it in chunk_items if it.image_url}
+
         try:
-            parsed_dict = extract_json_payload(raw_output)
-            parsed = Stage1BatchOutput.model_validate(parsed_dict)
+            parsed, audit = parse_and_audit_stage1(raw_output, chunk_items)
+
+            if audit.warnings:
+                for w in audit.warnings:
+                    logger.warning("[Stage1-Audit:%s] WARN: %s", chunk_id, w)
+            if not audit.is_valid:
+                for e in audit.errors:
+                    logger.warning("[Stage1-Audit:%s] ERROR (auto-sanitizing): %s", chunk_id, e)
 
             for cluster in parsed.clusters:
-                # Code-gate 1: Strictly enforce locked source status
+                # Code-gate 1: Strictly enforce locked source status for this chunk
                 enforced_status = expected_status
 
-                # Code-gate 2: Whitelist image_url against actual scraped URLs
+                # Code-gate 2: Whitelist image_url verbatim against scraped chunk images
                 safe_image_url = (
                     cluster.image_url
-                    if cluster.image_url in valid_scraped_images
+                    if cluster.image_url in allowed_chunk_images
                     else None
                 )
                 safe_image_credit = cluster.image_credit if safe_image_url else None
 
-                # Code-gate 3: Deterministically verify is_official on source URLs
+                # Code-gate 3: Whitelist source URLs verbatim & deterministically enforce is_official
                 clean_sources = []
                 for src in cluster.source_urls:
-                    if src.url.startswith(("http://", "https://")):
-                        is_off = False if enforced_status == "rumor" else _is_official_domain(src.url)
+                    if src.url in allowed_chunk_urls:
+                        is_off = (
+                            False
+                            if enforced_status == "rumor"
+                            else _is_official_domain(src.url)
+                        )
                         clean_sources.append(src.model_copy(update={"is_official": is_off}))
 
                 if not clean_sources:
                     continue
 
-                # Place official links first
                 clean_sources.sort(key=lambda s: not s.is_official)
 
                 validated_clusters.append(

@@ -237,6 +237,8 @@ def run_pipeline(
             batch_type=batch_type,
             stage1_clusters=stage1_clusters,
             midweek_published_headlines=midweek_headlines,
+            window_start_ict=window_start_utc.astimezone(ICT_TZ).isoformat(),
+            window_end_ict=window_end_utc.astimezone(ICT_TZ).isoformat(),
         )
         s2_in, s2_out, s2_fallback = (
             s2_res.input_tokens,
