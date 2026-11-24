@@ -86,12 +86,12 @@ def build_token_budgeted_chunks(
     items: List[RawScrapedItem],
     status: NewsStatus,
     max_input_tokens: int = 100_000,
-    max_items_per_chunk: int = 30,
+    max_items_per_chunk: int = 25,
 ) -> List[Tuple[str, NewsStatus, List[RawScrapedItem]]]:
     """
     Splits a single status stream into chunks staying safely below BOTH max_input_tokens
-    (reserving 15,000 tokens headroom) AND max_items_per_chunk (30 items) so Stage 1's
-    lossless JSON output never truncates against max_tokens.
+    (reserving 15,000 tokens headroom) AND max_items_per_chunk (25 items) so Stage 1's
+    exhaustive lossless JSON dossiers never truncate against max_tokens.
     """
     if not items:
         return []
