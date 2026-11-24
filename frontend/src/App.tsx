@@ -565,7 +565,7 @@ export const App: React.FC = () => {
               AINEWS
             </span>
             <span aria-hidden="true">·</span>
-            <span>อัปเดตทุกวันพุธและวันอาทิตย์ เวลา 05:00 น. (ICT)</span>
+            <span>อัปเดตทุกวัน เวลา 05:00 น. (ICT)</span>
           </div>
           <div>
             สรุปและตรวจสอบแหล่งที่มาอัตโนมัติด้วยระบบ Two-Stage Editorial Pipeline

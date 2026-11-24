@@ -291,9 +291,29 @@ class Stage2EditorialOutput(BaseModel):
     week_id: str = Field(..., pattern=r"^\d{4}-W(0[1-9]|[1-4][0-9]|5[0-3])$")
     batch_type: BatchType
     items: List[Stage2NewsItem] = Field(
-        ...,
-        description="Final curated 5-dimension Thai news briefs (verified across 4 categories + 2-3 top rumors)",
+        default_factory=list,
+        description="Final curated 5-dimension Thai news briefs (verified across 4 categories + 0-3 top rumors)",
     )
+    superseded_rumor_slugs: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Exact cluster_slug values of prior status='rumor' topics from <prior_published_topics> "
+            "that are now officially confirmed or superseded by a 'verified' item in this run. "
+            "The pipeline removes these obsolete rumors from Supabase to avoid Rumor+Verified duplicates."
+        ),
+    )
+
+    @field_validator("superseded_rumor_slugs", mode="before")
+    @classmethod
+    def sanitize_superseded_slugs(cls, v: Any) -> List[str]:
+        if not isinstance(v, list):
+            return []
+        cleaned: List[str] = []
+        for raw in v:
+            slug = _normalize_slug(raw)
+            if slug and slug != "ai-news-item" and slug not in cleaned:
+                cleaned.append(slug)
+        return cleaned
 
 
 # ==============================================================================

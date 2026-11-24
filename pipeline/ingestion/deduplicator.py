@@ -62,6 +62,27 @@ def deduplicate_stream(items: List[RawScrapedItem]) -> List[RawScrapedItem]:
     return result
 
 
+def filter_out_published_urls(
+    items: List[RawScrapedItem],
+    published_urls: Set[str],
+) -> Tuple[List[RawScrapedItem], int]:
+    """
+    Zero-cost pre-AI dedup: drops any raw item whose canonical URL is already stored
+    in Supabase public.news_items from recent runs.
+    """
+    if not published_urls:
+        return items, 0
+
+    kept: List[RawScrapedItem] = []
+    dropped = 0
+    for item in items:
+        if canonicalize_url(item.url) in published_urls:
+            dropped += 1
+            continue
+        kept.append(item)
+    return kept, dropped
+
+
 def prepare_ingestion_streams(
     verified_items: List[RawScrapedItem],
     rumor_items: List[RawScrapedItem],

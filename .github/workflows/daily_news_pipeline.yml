@@ -1,17 +1,16 @@
-name: Ainews Bi-Weekly AI News Pipeline
+name: Ainews Daily AI News Pipeline
 
 on:
   schedule:
     # Thailand Time (ICT, UTC+7):
-    # - Wednesday 04:15 AM ICT -> Tuesday 21:45 UTC (finishes by 05:00 AM ICT)
-    # - Sunday    04:15 AM ICT -> Saturday 21:45 UTC (finishes by 05:00 AM ICT)
-    # Bi-weekly runs also prevent Supabase Free Tier 7-day inactivity pause.
-    - cron: '45 21 * * 2,6'
+    # - Every day at 04:15 AM ICT -> 21:15 UTC (finishes well before 05:00 AM ICT)
+    # Daily runs also keep Supabase Free Tier permanently active.
+    - cron: '15 21 * * *'
 
   workflow_dispatch:
     inputs:
       batch_type:
-        description: 'Run cycle type (auto detects from Thailand ICT day)'
+        description: 'DB cycle tag (auto detects midweek Mon-Thu / weekend Fri-Sun ICT)'
         required: true
         default: 'auto'
         type: choice
@@ -19,14 +18,19 @@ on:
           - auto
           - midweek
           - weekend
+      lookback_hours:
+        description: 'Lookback window in hours (default 28h = 24h + 4h overlap buffer)'
+        required: false
+        default: '28'
+        type: string
       dry_run:
-        description: 'Run in Dry-Run mode (live RSS/Reddit fetch only, $0 AI/DB cost)'
+        description: 'Run in Dry-Run mode (live RSS/Community fetch only, $0 AI/DB write cost)'
         required: true
         default: false
         type: boolean
 
 concurrency:
-  group: ainews-biweekly-pipeline
+  group: ainews-daily-pipeline
   cancel-in-progress: false
 
 jobs:
@@ -50,7 +54,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r pipeline/requirements.txt
 
-      - name: Execute Ainews Pipeline
+      - name: Execute Ainews Daily Pipeline
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -58,8 +62,10 @@ jobs:
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
           STAGE1_MODEL: ${{ vars.STAGE1_MODEL || 'claude-haiku-5-5' }}
-          STAGE2_MODEL: ${{ vars.STAGE2_MODEL || 'claude-opus-5-5' }}
+          STAGE2_MODEL: ${{ vars.STAGE2_MODEL || 'claude-sonnet-5-5' }}
           STAGE2_THINKING_BUDGET: ${{ vars.STAGE2_THINKING_BUDGET || '4000' }}
+          DEFAULT_LOOKBACK_HOURS: '28'
+          DEDUP_LOOKBACK_DAYS: '7'
           BATCH_STAGE1_TIMEOUT_SECONDS: '1200'
           BATCH_STAGE2_TIMEOUT_SECONDS: '1200'
           BATCH_POLL_INTERVAL_SECONDS: '30'
@@ -72,6 +78,9 @@ jobs:
           ENABLE_OG_IMAGE_FETCH: 'true'
         run: |
           ARGS="--batch-type ${{ inputs.batch_type || 'auto' }}"
+          if [ -n "${{ inputs.lookback_hours }}" ]; then
+            ARGS="$ARGS --lookback-hours ${{ inputs.lookback_hours }}"
+          fi
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             ARGS="$ARGS --dry-run"
           fi

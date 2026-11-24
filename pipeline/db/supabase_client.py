@@ -6,11 +6,12 @@ Uses SUPABASE_SERVICE_ROLE_KEY (bypasses RLS for server-side writes while Fronte
 from __future__ import annotations
 
 import logging
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from supabase import Client, create_client
 
+from pipeline.ingestion.deduplicator import canonicalize_url
 from pipeline.schemas import BatchType, Stage2NewsItem, to_supabase_row
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,88 @@ class AinewsSupabaseClient:
                 "Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env or GitHub Secrets."
             )
         self.client: Client = create_client(url, service_role_key)
+
+    def fetch_recent_published_context(
+        self,
+        days: int = 7,
+        limit: int = 120,
+    ) -> Tuple[List[Dict[str, Any]], Set[str]]:
+        """
+        Fetches recently published items (both 'verified' and 'rumor') from the past `days`
+        so the daily pipeline can:
+          1. Pre-drop already-published source URLs BEFORE calling Stage 1 (zero AI cost).
+          2. Pass recent verified & rumor summaries to Stage 2 for cross-day dedup and
+             3-way Rumor-vs-Verified deconfliction (graduating confirmed rumors to verified).
+        """
+        cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        try:
+            resp = (
+                self.client.table("news_items")
+                .select("cluster_slug, status, company_tags, title_th, tldr_th, source_urls, published_at")
+                .gte("published_at", cutoff_iso)
+                .order("published_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            rows = resp.data or []
+            published_urls: Set[str] = set()
+            topics: List[Dict[str, Any]] = []
+
+            for row in rows:
+                topics.append(
+                    {
+                        "cluster_slug": row.get("cluster_slug", ""),
+                        "status": row.get("status", "verified"),
+                        "company_tags": row.get("company_tags") or [],
+                        "title_th": row.get("title_th", ""),
+                        "tldr_th": row.get("tldr_th", ""),
+                    }
+                )
+                for src in row.get("source_urls") or []:
+                    raw_url = src.get("url") if isinstance(src, dict) else None
+                    if raw_url:
+                        published_urls.add(canonicalize_url(str(raw_url)))
+
+            logger.info(
+                "Loaded %d recent published topics (%d verified, %d rumor) and %d canonical URLs (last %dd) from Supabase.",
+                len(topics),
+                sum(1 for t in topics if t["status"] == "verified"),
+                sum(1 for t in topics if t["status"] == "rumor"),
+                len(published_urls),
+                days,
+            )
+            return topics, published_urls
+        except Exception as exc:
+            logger.warning("Could not fetch recent published context: %s", exc)
+            return [], set()
+
+    def delete_superseded_rumors(self, rumor_slugs: List[str]) -> int:
+        """
+        Safely deletes stale status='rumor' rows whose story has now been officially
+        confirmed by a new status='verified' brief. Double-locked to status='rumor' ONLY.
+        """
+        clean_slugs = [s.strip() for s in rumor_slugs if s and s.strip()]
+        if not clean_slugs:
+            return 0
+
+        try:
+            resp = (
+                self.client.table("news_items")
+                .delete()
+                .eq("status", "rumor")
+                .in_("cluster_slug", clean_slugs)
+                .execute()
+            )
+            deleted = len(resp.data or [])
+            logger.info(
+                "Removed %d superseded rumor item(s) now confirmed as verified: %s",
+                deleted,
+                clean_slugs,
+            )
+            return deleted
+        except Exception as exc:
+            logger.warning("Failed removing superseded rumors %s: %s", clean_slugs, exc)
+            return 0
 
     def fetch_midweek_headlines(self, week_id: str) -> List[Dict[str, Any]]:
         """

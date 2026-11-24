@@ -1,15 +1,14 @@
 """
-Stage 2 Processor: claude-opus-5-5 (Extended Thinking: Medium / 4,000 tokens)
+Stage 2 Processor: claude-sonnet-5-5 (default; supports Opus/Sonnet 5.5 Adaptive Thinking)
 Wired directly to `pipeline.prompts`:
   - Cache-friendly static system prompt (`cache_control: {"type": "ephemeral"}`)
-  - XML-sandboxed `<prior_midweek_topics>` & `<stage1_clusters>`
+  - XML-sandboxed `<prior_published_topics>` (7-day cross-day dedup) & `<stage1_clusters>`
   - Deterministic Gate 2 audit (`parse_and_audit_stage2`) checking provenance,
     status isolation, 5-dimension Thai prefix contract, and zero Markdown leakage
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any, Dict, List, Set, Tuple
@@ -20,7 +19,7 @@ from pipeline.ai_processor.batch_client import (
 )
 from pipeline.config import PROJECT_ROOT, PipelineConfig
 from pipeline.prompts import (
-    PriorMidweekTopic,
+    PriorPublishedTopic,
     build_stage2_message_params,
     parse_and_audit_stage2,
 )
@@ -50,23 +49,24 @@ def run_stage2_opus(
     midweek_published_headlines: List[Dict[str, Any]],
     window_start_ict: str = "",
     window_end_ict: str = "",
-) -> Tuple[List[Stage2NewsItem], BatchExecutionResult]:
+) -> Tuple[List[Stage2NewsItem], List[str], BatchExecutionResult]:
     """
-    Executes Stage 2 (claude-opus-5-5 with Extended Thinking budget=4000) via
+    Executes Stage 2 (default claude-sonnet-5-5 with Adaptive Thinking) via
     Anthropic Message Batches API using `pipeline.prompts.build_stage2_message_params`,
-    then audits and code-gates all curated Thai briefs via `parse_and_audit_stage2`.
+    then audits and code-gates all curated Thai briefs and superseded rumor slugs.
     """
+    stage_label = f"Stage2-{config.stage2_model}"
     if not stage1_clusters:
-        logger.warning("[Stage 2] No Stage 1 clusters available. Skipping Opus 5.5.")
-        return [], BatchExecutionResult()
+        logger.warning("[%s] No Stage 1 clusters available. Skipping Stage 2.", stage_label)
+        return [], [], BatchExecutionResult()
 
-    # Convert midweek DB rows into typed PriorMidweekTopic context for weekend dedup
-    prior_topics: List[PriorMidweekTopic] = []
-    if batch_type == "weekend" and midweek_published_headlines:
+    # Pass all recently published DB rows (last N days) for cross-day anti-duplication
+    prior_topics: List[PriorPublishedTopic] = []
+    if midweek_published_headlines:
         for row in midweek_published_headlines:
             try:
                 prior_topics.append(
-                    PriorMidweekTopic(
+                    PriorPublishedTopic(
                         cluster_slug=str(row.get("cluster_slug") or ""),
                         status=row.get("status") if row.get("status") in ("verified", "rumor") else "verified",
                         company_tags=list(row.get("company_tags") or []),
@@ -83,24 +83,24 @@ def run_stage2_opus(
         stage1_clusters=stage1_clusters,
         window_start_ict=window_start_ict,
         window_end_ict=window_end_ict,
-        prior_midweek_topics=prior_topics,
+        prior_published_topics=prior_topics,
         model=config.stage2_model,
         max_tokens=40000,
         thinking_budget_tokens=config.stage2_thinking_budget,
         enable_cache=True,
     )
 
-    custom_id = f"stage2-opus-{week_id}-{batch_type}"
+    custom_id = f"stage2-{week_id}-{batch_type}"
     exec_result = runner.execute_batch_with_fallback(
         requests=[{"custom_id": custom_id, "params": params}],
         timeout_seconds=config.batch_stage2_timeout_seconds,
         poll_interval_seconds=config.batch_poll_interval_seconds,
-        stage_label="Stage2-Opus",
+        stage_label=stage_label,
     )
 
     raw_output = exec_result.outputs.get(custom_id, "")
     if not raw_output:
-        raise RuntimeError("[Stage2-Opus] Received empty output from Anthropic API.")
+        raise RuntimeError(f"[{stage_label}] Received empty output from Anthropic API.")
 
     # Save raw paid Stage 2 output immediately to gitignored pipeline/data/
     try:
@@ -182,14 +182,38 @@ def run_stage2_opus(
             )
         )
 
+    # Triple-locked deterministic gate for superseded rumor graduation:
+    # Only accept slugs that actually exist as status='rumor' in prior_topics AND only when
+    # at least one verified item is emitted in this run.
+    known_prior_rumor_slugs: Set[str] = {
+        t.cluster_slug for t in prior_topics if t.status == "rumor" and t.cluster_slug
+    }
+    has_new_verified = any(i.status == "verified" for i in final_items)
+    validated_superseded_rumors: List[str] = []
+    if has_new_verified:
+        for slug in validated.superseded_rumor_slugs:
+            if slug in known_prior_rumor_slugs:
+                validated_superseded_rumors.append(slug)
+            else:
+                logger.warning(
+                    "[Stage2-CodeGate] Ignoring unknown/non-rumor superseded_rumor_slug '%s'.",
+                    slug,
+                )
+
     logger.info(
-        "[Stage2-Opus] Curated %d final Thai briefs (verified=%d, rumor=%d, in=%d, out=%d, fallback=%s, audit_ok=%s).",
+        "[%s] Curated %d final Thai briefs (verified=%d, rumor=%d, superseded_rumors=%d, in=%d, out=%d, fallback=%s, audit_ok=%s).",
+        stage_label,
         len(final_items),
         sum(1 for i in final_items if i.status == "verified"),
         sum(1 for i in final_items if i.status == "rumor"),
+        len(validated_superseded_rumors),
         exec_result.input_tokens,
         exec_result.output_tokens,
         exec_result.used_fallback,
         audit.is_valid,
     )
-    return final_items, exec_result
+    return final_items, validated_superseded_rumors, exec_result
+
+
+# Readable alias for daily Sonnet/Opus Stage 2 editor
+run_stage2_editor = run_stage2_opus

@@ -17,8 +17,8 @@ interface FilterBarProps {
 
 const CYCLES: Array<{ id: CycleFilter; label: string }> = [
   { id: 'all', label: 'รวมทั้งสัปดาห์' },
-  { id: 'midweek', label: 'รอบวันพุธ' },
-  { id: 'weekend', label: 'รอบวันอาทิตย์' },
+  { id: 'midweek', label: 'ต้นสัปดาห์ (จ.–พฤ.)' },
+  { id: 'weekend', label: 'ปลายสัปดาห์ (ศ.–อา.)' },
 ];
 
 export const FilterBar: React.FC<FilterBarProps> = ({

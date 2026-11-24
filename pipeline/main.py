@@ -1,12 +1,12 @@
 """
-Main Orchestrator for Ainews Automated Bi-Weekly Pipeline.
+Main Orchestrator for Ainews Automated Daily AI News Pipeline (Haiku 5.5 + Sonnet 5.5).
 Usage:
-  - Test live RSS + Reddit + Image extraction with zero AI/DB cost:
+  - Test live RSS + Community + Image extraction with zero AI/DB cost:
       python -m pipeline.main --dry-run
-  - Full production run (auto-detects midweek/weekend from Asia/Bangkok ICT time):
+  - Full production run (daily 28h window, URL pre-dedup + 3-way rumor-vs-verified check):
       python -m pipeline.main
-  - Force specific batch cycle:
-      python -m pipeline.main --batch-type midweek
+  - Override lookback hours or cycle tag:
+      python -m pipeline.main --lookback-hours 48 --batch-type midweek
 """
 
 from __future__ import annotations
@@ -16,15 +16,14 @@ import json
 import logging
 import sys
 from datetime import datetime
-from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional, Set
 
 from pipeline.ai_processor.batch_client import AnthropicBatchRunner
 from pipeline.ai_processor.stage1_haiku import (
     build_token_budgeted_chunks,
     run_stage1_haiku,
 )
-from pipeline.ai_processor.stage2_opus import run_stage2_opus
+from pipeline.ai_processor.stage2_opus import run_stage2_editor
 from pipeline.config import (
     ICT_TZ,
     PROJECT_ROOT,
@@ -35,7 +34,10 @@ from pipeline.config import (
 )
 from pipeline.db.supabase_client import AinewsSupabaseClient
 from pipeline.ingestion.community_rumor_fetcher import fetch_rumor_community_items
-from pipeline.ingestion.deduplicator import prepare_ingestion_streams
+from pipeline.ingestion.deduplicator import (
+    filter_out_published_urls,
+    prepare_ingestion_streams,
+)
 from pipeline.ingestion.rss_fetcher import fetch_verified_rss_items
 from pipeline.schemas import BatchType
 
@@ -54,38 +56,48 @@ def calculate_estimated_cost_usd(
     s2_in: int,
     s2_out: int,
     s2_fallback: bool,
+    stage2_model: str = "claude-sonnet-5-5",
 ) -> float:
     """
     Estimates Anthropic API spend in USD based on Batch API (50% off) vs Standard API rates:
-      - Stage 1 (Haiku tier): Batch $0.50/M in, $2.50/M out | Standard $1.00/M in, $5.00/M out
-      - Stage 2 (Opus tier):  Batch $2.50/M in, $12.50/M out | Standard $5.00/M in, $25.00/M out
+      - Stage 1 (Haiku tier):  Batch $0.50/M in, $2.50/M out  | Standard $1.00/M in, $5.00/M out
+      - Stage 2 (Sonnet tier): Batch $1.50/M in, $7.50/M out  | Standard $3.00/M in, $15.00/M out
+      - Stage 2 (Opus tier):   Batch $2.50/M in, $12.50/M out | Standard $5.00/M in, $25.00/M out
     """
     s1_mult = 2.0 if s1_fallback else 1.0
     s2_mult = 2.0 if s2_fallback else 1.0
 
+    model_lower = (stage2_model or "").lower()
+    if "opus" in model_lower:
+        s2_in_rate, s2_out_rate = 2.50, 12.50
+    elif "haiku" in model_lower:
+        s2_in_rate, s2_out_rate = 0.50, 2.50
+    else:
+        s2_in_rate, s2_out_rate = 1.50, 7.50
+
     s1_cost = ((s1_in / 1_000_000) * 0.50 + (s1_out / 1_000_000) * 2.50) * s1_mult
-    s2_cost = ((s2_in / 1_000_000) * 2.50 + (s2_out / 1_000_000) * 12.50) * s2_mult
+    s2_cost = ((s2_in / 1_000_000) * s2_in_rate + (s2_out / 1_000_000) * s2_out_rate) * s2_mult
     return s1_cost + s2_cost
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Ainews Bi-Weekly AI News Data Pipeline")
+    parser = argparse.ArgumentParser(description="Ainews Daily AI News Data Pipeline")
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Run live RSS + Reddit + Image ingestion & token estimation without calling Anthropic API or writing to Supabase.",
+        help="Run live RSS + Community + Image ingestion & token estimation without calling Anthropic API or writing to Supabase.",
     )
     parser.add_argument(
         "--batch-type",
         choices=["auto", "midweek", "weekend"],
         default="auto",
-        help="Override batch cycle type (default: auto-detected from Asia/Bangkok ICT day).",
+        help="Override DB batch_type tag (default: auto-detected from Asia/Bangkok ICT weekday).",
     )
     parser.add_argument(
         "--lookback-hours",
         type=int,
         default=None,
-        help="Optional override for lookback hours (default: 84h for midweek, 96h for weekend).",
+        help="Optional override for lookback hours (default: 28h daily cycle = 24h + 4h overlap buffer).",
     )
     parser.add_argument(
         "--skip-og-images",
@@ -113,10 +125,18 @@ def run_pipeline(
         now_utc=started_at_utc,
         override_batch_type=override_batch,
         custom_lookback_hours=lookback_hours,
+        default_lookback_hours=config.default_lookback_hours,
     )
 
     logger.info("======================================================================")
-    logger.info("AINEWS PIPELINE START | mode=%s | week_id=%s | batch_type=%s", "DRY-RUN" if dry_run else "PRODUCTION", week_id, batch_type)
+    logger.info(
+        "AINEWS DAILY PIPELINE START | mode=%s | week_id=%s | batch_type=%s | s1=%s | s2=%s",
+        "DRY-RUN" if dry_run else "PRODUCTION",
+        week_id,
+        batch_type,
+        config.stage1_model,
+        config.stage2_model,
+    )
     logger.info(
         "Window (ICT UTC+7): %s -> %s",
         window_start_utc.astimezone(ICT_TZ).strftime("%Y-%m-%d %H:%M ICT"),
@@ -136,6 +156,43 @@ def run_pipeline(
         max_verified=config.max_verified_items,
         max_rumor=config.max_rumor_items,
     )
+
+    # Zero-cost DB URL pre-dedup: read recent published URLs & topics before Stage 1
+    db: Optional[AinewsSupabaseClient] = None
+    recent_published_topics: List[Dict[str, Any]] = []
+    published_urls: Set[str] = set()
+    dropped_verified_urls = 0
+    dropped_rumor_urls = 0
+
+    if not dry_run:
+        db = AinewsSupabaseClient(config.supabase_url, config.supabase_service_role_key)
+        recent_published_topics, published_urls = db.fetch_recent_published_context(
+            days=config.dedup_lookback_days
+        )
+    elif config.supabase_url and config.supabase_service_role_key and "your-project-id" not in config.supabase_url:
+        try:
+            db = AinewsSupabaseClient(config.supabase_url, config.supabase_service_role_key)
+            recent_published_topics, published_urls = db.fetch_recent_published_context(
+                days=config.dedup_lookback_days
+            )
+        except Exception as exc:
+            logger.info("[DRY-RUN] Skipping optional DB pre-dedup preview: %s", exc)
+
+    if published_urls:
+        verified_items, dropped_verified_urls = filter_out_published_urls(
+            verified_items, published_urls
+        )
+        rumor_items, dropped_rumor_urls = filter_out_published_urls(
+            rumor_items, published_urls
+        )
+        logger.info(
+            "Zero-cost URL pre-dedup dropped %d already-published items (verified=%d, rumor=%d) -> remaining=%d",
+            dropped_verified_urls + dropped_rumor_urls,
+            dropped_verified_urls,
+            dropped_rumor_urls,
+            len(verified_items) + len(rumor_items),
+        )
+
     total_raw = len(verified_items) + len(rumor_items)
 
     # Preview Stage 1 token chunking
@@ -163,12 +220,16 @@ def run_pipeline(
             "mode": "dry_run",
             "week_id": week_id,
             "batch_type": batch_type,
+            "stage1_model": config.stage1_model,
+            "stage2_model": config.stage2_model,
             "window_start_ict": window_start_utc.astimezone(ICT_TZ).isoformat(),
             "window_end_ict": window_end_utc.astimezone(ICT_TZ).isoformat(),
             "summary": {
                 "verified_items": len(verified_items),
                 "rumor_items": len(rumor_items),
                 "total_items": total_raw,
+                "dropped_already_published_urls": dropped_verified_urls + dropped_rumor_urls,
+                "recent_published_topics_loaded": len(recent_published_topics),
                 "items_with_images": images_found,
                 "stage1_chunks": len(v_chunks) + len(r_chunks),
                 "estimated_stage1_input_tokens": est_s1_input_tokens,
@@ -182,8 +243,10 @@ def run_pipeline(
         )
 
         logger.info("------------------- DRY-RUN SUMMARY -------------------")
-        logger.info("Verified RSS items fetched : %d / %d", len(verified_items), config.max_verified_items)
-        logger.info("Rumor Community fetched    : %d / %d", len(rumor_items), config.max_rumor_items)
+        logger.info("Models configured          : Stage1=%s | Stage2=%s", config.stage1_model, config.stage2_model)
+        logger.info("Dropped already-in-DB URLs : %d (verified=%d, rumor=%d)", dropped_verified_urls + dropped_rumor_urls, dropped_verified_urls, dropped_rumor_urls)
+        logger.info("New Verified RSS items     : %d / %d", len(verified_items), config.max_verified_items)
+        logger.info("New Rumor Community items  : %d / %d", len(rumor_items), config.max_rumor_items)
         logger.info("Items with real images     : %d / %d", images_found, total_raw)
         logger.info("Stage 1 planned chunks     : %d (est. %d input tokens)", len(v_chunks) + len(r_chunks), est_s1_input_tokens)
         logger.info("Preview JSON saved to      : %s", preview_path)
@@ -192,18 +255,16 @@ def run_pipeline(
         return 0
 
     if total_raw == 0:
-        logger.warning("No items fetched within time window. Exiting gracefully.")
+        logger.info(
+            "Zero brand-new items remain after lookback & URL pre-dedup. Skipping AI calls ($0.00 spent)."
+        )
         return 0
 
     # ------------------------------------------------------------------
-    # STEP 2: Initialize Clients & Fetch Midweek Headlines (if Weekend)
+    # STEP 2: Initialize Anthropic Client
     # ------------------------------------------------------------------
-    db = AinewsSupabaseClient(config.supabase_url, config.supabase_service_role_key)
+    assert db is not None
     runner = AnthropicBatchRunner(config.anthropic_api_key)
-
-    midweek_headlines = (
-        db.fetch_midweek_headlines(week_id) if batch_type == "weekend" else []
-    )
 
     s1_in = s1_out = s2_in = s2_out = 0
     s1_fallback = s2_fallback = False
@@ -228,15 +289,15 @@ def run_pipeline(
         stage1_clusters_count = len(stage1_clusters)
 
         # ------------------------------------------------------------------
-        # STEP 4: Stage 2 — claude-opus-5-5 (5-Dimension Thai Editorial Brief)
+        # STEP 4: Stage 2 — claude-sonnet-5-5 (5D Brief + Rumor/Verified Dedup)
         # ------------------------------------------------------------------
-        final_items, s2_res = run_stage2_opus(
+        final_items, superseded_rumor_slugs, s2_res = run_stage2_editor(
             runner=runner,
             config=config,
             week_id=week_id,
             batch_type=batch_type,
             stage1_clusters=stage1_clusters,
-            midweek_published_headlines=midweek_headlines,
+            midweek_published_headlines=recent_published_topics,
             window_start_ict=window_start_utc.astimezone(ICT_TZ).isoformat(),
             window_end_ict=window_end_utc.astimezone(ICT_TZ).isoformat(),
         )
@@ -247,11 +308,22 @@ def run_pipeline(
         )
 
         # ------------------------------------------------------------------
-        # STEP 5: Upsert Curated News Items & Log Pipeline Run to Supabase
+        # STEP 5: Upsert Curated News, Clear Confirmed Rumors & Log Run
         # ------------------------------------------------------------------
         final_news_count = db.upsert_news_items(week_id, batch_type, final_items)
+        removed_rumors_count = (
+            db.delete_superseded_rumors(superseded_rumor_slugs)
+            if superseded_rumor_slugs
+            else 0
+        )
         est_cost = calculate_estimated_cost_usd(
-            s1_in, s1_out, s1_fallback, s2_in, s2_out, s2_fallback
+            s1_in,
+            s1_out,
+            s1_fallback,
+            s2_in,
+            s2_out,
+            s2_fallback,
+            stage2_model=config.stage2_model,
         )
 
         db.record_pipeline_run(
@@ -275,8 +347,9 @@ def run_pipeline(
         )
 
         logger.info(
-            "PIPELINE COMPLETED SUCCESSFULLY | saved=%d briefs | est_cost=$%.4f",
+            "PIPELINE COMPLETED SUCCESSFULLY | saved=%d briefs | graduated_rumors_removed=%d | est_cost=$%.4f",
             final_news_count,
+            removed_rumors_count,
             est_cost,
         )
         return 0
@@ -284,7 +357,13 @@ def run_pipeline(
     except Exception as exc:
         logger.exception("Pipeline failed with error: %s", exc)
         est_cost = calculate_estimated_cost_usd(
-            s1_in, s1_out, s1_fallback, s2_in, s2_out, s2_fallback
+            s1_in,
+            s1_out,
+            s1_fallback,
+            s2_in,
+            s2_out,
+            s2_fallback,
+            stage2_model=config.stage2_model,
         )
         db.record_pipeline_run(
             week_id=week_id,

@@ -42,9 +42,9 @@ export const Header: React.FC<HeaderProps> = ({
               |
             </span>
             <span className="hidden sm:inline">
-              ฉบับสรุปรายสัปดาห์ · อัปเดตทุกวันพุธและวันอาทิตย์ 05:00 น. (ICT)
+              ฉบับอัปเดตรายวัน · อัปเดตทุกวัน เวลา 05:00 น. (ICT)
             </span>
-            <span className="sm:hidden">พุธ &amp; อาทิตย์ · 05:00 ICT</span>
+            <span className="sm:hidden">อัปเดตทุกวัน · 05:00 ICT</span>
           </div>
 
           <div className="flex items-center gap-3 shrink-0">

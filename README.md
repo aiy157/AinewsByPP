@@ -1,32 +1,37 @@
-# AINEWS — Automated Weekly Thai AI Intelligence Dashboard
+# AINEWS — Automated Daily Thai AI Intelligence Dashboard
 
-**Ainews** is an automated, cost-optimized AI news aggregation, two-stage editorial synthesis, and international broadsheet web dashboard built for Thai readers. It tracks major AI labs, ArXiv research, tech press, and developer community signals twice weekly, strictly separating **Verified Facts (`status: verified`)** from **Community Rumors & Leaks (`status: rumor`)**.
+**Ainews** is an automated, cost-optimized daily AI news aggregation, two-stage editorial synthesis, and international broadsheet web dashboard built for Thai readers. It tracks major AI labs, ArXiv research, tech press, and developer community signals every morning, strictly separating **Verified Facts (`status: verified`)** from **Community Rumors & Leaks (`status: rumor`)** — with automatic 3-way rumor-vs-verified deconfliction when rumors graduate into official announcements.
 
 ---
 
 ## System Architecture
 
 ```text
-Bi-Weekly Schedule (Wed & Sun 04:15 AM ICT / cron: 45 21 * * 2,6 on GitHub Actions)
+Daily Schedule (Every day 04:15 AM ICT / cron: 15 21 * * * UTC on GitHub Actions)
   │
-  ├── Pipe 1: Verified Facts (Max 125 items, status='verified')
+  ├── Pipe 1: Verified Facts (Max 125 items, status='verified', 28h lookback)
   │     └── 15 RSS Feeds: OpenAI, Anthropic, Google DeepMind/AI, Meta AI, xAI,
   │         DeepSeek, Hugging Face, ArXiv (cs.AI/cs.CL/cs.LG), TechCrunch, The Verge, Blognone
   │         + 3-Tier Zero-Cost Image Extraction (RSS media -> <head> og:image -> null)
   │
-  └── Pipe 2: Rumor Radar (Max 25 items, status='rumor')
+  └── Pipe 2: Rumor Radar (Max 25 items, status='rumor', 28h lookback)
         └── Hacker News Official Algolia API + Lobste.rs AI Community
             (+ Optional Reddit OAuth2 oauth.reddit.com if configured)
   │
-  ▼  URL Canonicalization, ICT (UTC+7) Time-Windowing & Deduplication
+  ▼  Zero-Cost URL Canonicalization + DB URL Pre-Dedup (skips already-published URLs before AI)
   │
   ▼  Stage 1: Anthropic Message Batches API — claude-haiku-5-5 (Thinking: Disabled)
   │    • Prompt Caching + XML-Sandboxed Prompt Injection Defense
-  │    • Strictly separated Verified & Rumor chunks (<= 100,000 Input Tokens/chunk)
+  │    • Strictly separated Verified & Rumor chunks (<= 30 items / 100k tokens per chunk)
   │    • Lossless 5–10 Fact Extraction + URL Merging + Image Whitelist Gate
   │
-  ▼  Stage 2: Anthropic Message Batches API — claude-opus-5-5 (Thinking: 4,000 Tokens)
-  │    • Cross-cycle anti-duplication (injects Wednesday midweek topics into Sunday run)
+  ▼  Stage 2: Anthropic Message Batches API — claude-sonnet-5-5 (Adaptive Thinking: Medium)
+  │    • Cross-day anti-duplication (injects past 7 days of published verified & rumor topics)
+  │    • 3-Way Rumor-vs-Verified Deconfliction:
+  │      (a) Drops same-day rumor if officially confirmed in the same run
+  │      (b) Drops late rumor if already published as verified earlier in the week
+  │      (c) Graduates confirmed rumors: emits `superseded_rumor_slugs` so pipeline
+  │          automatically removes stale rumor cards from Supabase when official news lands
   │    • Ultra-detailed 4-Layer Thai Editorial Brief:
   │      1) Headline + Executive TL;DR + Real Source Image
   │      2) Key Facts Quick-Scan Strip (3–4 metrics)
@@ -46,7 +51,7 @@ Bi-Weekly Schedule (Wed & Sun 04:15 AM ICT / cron: 45 21 * * 2,6 on GitHub Actio
 ```text
 Ainews/
 ├── .github/workflows/
-│   └── biweekly_news_pipeline.yml   # Wed & Sun 04:15 ICT Cron + manual workflow_dispatch
+│   └── daily_news_pipeline.yml      # Daily 04:15 ICT Cron + manual workflow_dispatch
 ├── .agents/skills/                  # Installed workspace Agent Skills
 ├── supabase/
 │   ├── schema.sql                   # Tables (news_items, pipeline_runs), constraints, indexes, RLS
@@ -129,8 +134,8 @@ npm run build     # Production build into frontend/dist
 
 ## Deployment
 
-### GitHub Actions (Automated Bi-Weekly Schedule)
-Runs automatically every **Wednesday and Sunday at 04:15 AM ICT (`45 21 * * 2,6` UTC)** so summaries are ready by 05:00 AM ICT (and keeps Supabase Free Tier active past the 7-day inactivity pause).
+### GitHub Actions (Automated Daily Schedule)
+Runs automatically **every day at 04:15 AM ICT (`15 21 * * *` UTC)** with a 28-hour lookback window + zero-cost URL pre-dedup so summaries are ready by 05:00 AM ICT (and keeps Supabase Free Tier permanently active).
 
 Configure these **Repository Secrets** in `Settings → Secrets and variables → Actions`:
 - `ANTHROPIC_API_KEY`
@@ -142,7 +147,7 @@ Configure these **Repository Secrets** in `Settings → Secrets and variables �
 - **Root Directory:** `frontend`
 - **Build Command:** `npm run build`
 - **Output Directory:** `dist`
-- **Environment Variables:** `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
+- **Environment Variables:** `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (also auto-detects `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`)
 
 ---
 
@@ -150,7 +155,7 @@ Configure these **Repository Secrets** in `Settings → Secrets and variables �
 
 | Component | Tier / Pricing | Est. Monthly Cost |
 | :--- | :--- | :--- |
-| **Anthropic Batch API** (Haiku 5.5 + Opus 5.5 + Prompt Caching, 8–9 runs/mo) | 50% Batch discount + Caching | **~$2.50 – $5.00 / mo** |
+| **Anthropic Batch API** (Haiku 5.5 + Sonnet 5.5 + Prompt Caching, 30 daily runs/mo) | 50% Batch discount + URL pre-dedup | **~$4.00 – $6.00 / mo** |
 | **Data Ingestion** (15 RSS Feeds, Hacker News Algolia, Lobste.rs, `og:image`) | Public / Free | **$0** |
 | **Supabase (PostgreSQL)** | Free Tier (500 MB) | **$0** |
 | **GitHub Actions** | Free Tier (2,000 mins/mo) | **$0** |

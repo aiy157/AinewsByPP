@@ -45,6 +45,8 @@ class PipelineConfig:
     max_verified_items: int
     max_rumor_items: int
     stage1_max_input_tokens_per_chunk: int
+    default_lookback_hours: int
+    dedup_lookback_days: int
 
     # Reddit API Credentials (Optional OAuth2 for oauth.reddit.com) & Filter Thresholds
     reddit_client_id: str
@@ -63,7 +65,7 @@ def load_config() -> PipelineConfig:
     return PipelineConfig(
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", "").strip(),
         stage1_model=os.getenv("STAGE1_MODEL", "claude-haiku-5-5").strip(),
-        stage2_model=os.getenv("STAGE2_MODEL", "claude-opus-5-5").strip(),
+        stage2_model=os.getenv("STAGE2_MODEL", "claude-sonnet-5-5").strip(),
         stage2_thinking_budget=int(os.getenv("STAGE2_THINKING_BUDGET", "4000")),
         batch_stage1_timeout_seconds=int(os.getenv("BATCH_STAGE1_TIMEOUT_SECONDS", "1200")),
         batch_stage2_timeout_seconds=int(os.getenv("BATCH_STAGE2_TIMEOUT_SECONDS", "1200")),
@@ -75,6 +77,8 @@ def load_config() -> PipelineConfig:
         stage1_max_input_tokens_per_chunk=int(
             os.getenv("STAGE1_MAX_INPUT_TOKENS_PER_CHUNK", "100000")
         ),
+        default_lookback_hours=int(os.getenv("DEFAULT_LOOKBACK_HOURS", "28")),
+        dedup_lookback_days=int(os.getenv("DEDUP_LOOKBACK_DAYS", "7")),
         reddit_client_id=os.getenv("REDDIT_CLIENT_ID", "").strip(),
         reddit_client_secret=os.getenv("REDDIT_CLIENT_SECRET", "").strip(),
         reddit_min_score=int(os.getenv("REDDIT_MIN_SCORE", "20")),
@@ -93,12 +97,15 @@ def resolve_batch_type_and_window(
     now_utc: Optional[datetime] = None,
     override_batch_type: Optional[BatchType] = None,
     custom_lookback_hours: Optional[int] = None,
+    default_lookback_hours: int = 28,
 ) -> Tuple[str, BatchType, datetime, datetime]:
     """
     Computes the canonical ISO week_id, batch_type ('midweek' | 'weekend'),
-    and exact UTC time window based on Asia/Bangkok (ICT, UTC+7) schedule:
-      - midweek (Wed 05:00 ICT): Previous Sun 05:00 ICT -> Wed 05:00 ICT (84 hours)
-      - weekend (Sun 05:00 ICT): Wed 05:00 ICT -> Sun 05:00 ICT (96 hours)
+    and exact UTC time window based on Asia/Bangkok (ICT, UTC+7) daily schedule:
+      - Daily run (04:15 AM ICT -> finishes by 05:00 AM ICT): default 28h lookback
+        (24h cycle + 4h overlap buffer for delayed RSS timestamps, deduped against DB).
+      - batch_type stays 'midweek' (Mon-Thu ICT) / 'weekend' (Fri-Sun ICT) to preserve
+        full compatibility with Supabase CHECK constraints without DB migrations.
     """
     ref_utc = (now_utc or datetime.now(UTC_TZ)).astimezone(UTC_TZ)
     ref_ict = ref_utc.astimezone(ICT_TZ)
@@ -108,20 +115,19 @@ def resolve_batch_type_and_window(
     if override_batch_type:
         batch_type: BatchType = override_batch_type
     else:
-        # Wednesday runs -> midweek; Sunday runs -> weekend; fallback Mon-Thu=midweek, Fri-Sun=weekend
         batch_type = "midweek" if ref_ict.weekday() in (0, 1, 2, 3) else "weekend"
 
     iso_year, iso_week, _ = ref_ict.isocalendar()
     week_id = f"{iso_year}-W{iso_week:02d}"
 
     # Determine exact lookback window in UTC
-    if custom_lookback_hours is not None:
-        window_end_utc = ref_utc
-        window_start_utc = ref_utc - timedelta(hours=custom_lookback_hours)
-    else:
-        lookback_hours = 84 if batch_type == "midweek" else 96
-        window_end_utc = ref_utc
-        window_start_utc = ref_utc - timedelta(hours=lookback_hours)
+    lookback_hours = (
+        custom_lookback_hours
+        if custom_lookback_hours is not None
+        else default_lookback_hours
+    )
+    window_end_utc = ref_utc
+    window_start_utc = ref_utc - timedelta(hours=lookback_hours)
 
     return week_id, batch_type, window_start_utc, window_end_utc
 
