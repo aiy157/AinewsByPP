@@ -2,15 +2,42 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { NewsItem } from '../types/news';
 import { MOCK_NEWS_ITEMS } from '../data/mockNews';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+const PLACEHOLDER_MARKERS = [
+  'your-project-id',
+  'your-supabase-anon-key',
+  'your-supabase-publishable-key',
+  'your-supabase-secret',
+];
 
-export const isSupabaseConfigured = Boolean(
-  supabaseUrl &&
-    supabaseAnonKey &&
-    !supabaseUrl.includes('your-project-id') &&
-    !supabaseAnonKey.includes('your-supabase-anon-key')
-);
+function isValidPublicValue(val: string | undefined, isKey = false): val is string {
+  if (!val) return false;
+  const trimmed = val.trim();
+  if (!trimmed) return false;
+  const lower = trimmed.toLowerCase();
+  if (PLACEHOLDER_MARKERS.some((m) => lower.includes(m))) return false;
+  if (isKey && (lower.startsWith('sb_secret_') || lower.includes('service_role'))) {
+    return false;
+  }
+  return true;
+}
+
+const rawViteUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const rawViteKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) as string | undefined;
+
+const supabaseUrl = isValidPublicValue(rawViteUrl)
+  ? rawViteUrl.trim()
+  : isValidPublicValue(__AINEWS_SUPABASE_URL__)
+  ? __AINEWS_SUPABASE_URL__.trim()
+  : undefined;
+
+const supabaseAnonKey = isValidPublicValue(rawViteKey, true)
+  ? rawViteKey.trim()
+  : isValidPublicValue(__AINEWS_SUPABASE_ANON_KEY__, true)
+  ? __AINEWS_SUPABASE_ANON_KEY__.trim()
+  : undefined;
+
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
 export const supabase: SupabaseClient | null = isSupabaseConfigured
   ? createClient(supabaseUrl!, supabaseAnonKey!)
@@ -27,6 +54,9 @@ export async function fetchAllNewsItems(forceMock = false): Promise<FetchNewsRes
     return {
       items: MOCK_NEWS_ITEMS,
       source: 'mock',
+      errorMessage: forceMock
+        ? undefined
+        : 'ยังไม่พบค่า Public Key ของ Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY) — แสดงข้อมูลตัวอย่าง Mock Data ชั่วคราว',
     };
   }
 

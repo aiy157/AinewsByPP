@@ -49,11 +49,15 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             aria-label="เลือกสัปดาห์"
             className="w-full h-9 pl-8 pr-3 text-xs font-semibold rounded-md border border-rule bg-surface text-ink-primary focus:outline-none focus:border-editorial transition-colors cursor-pointer"
           >
-            {availableWeeks.map((week, idx) => (
-              <option key={week} value={week}>
-                สัปดาห์ {week} {idx === 0 ? '(ล่าสุด)' : ''}
-              </option>
-            ))}
+            {availableWeeks.length === 0 ? (
+              <option value="">กำลังโหลดสัปดาห์...</option>
+            ) : (
+              availableWeeks.map((week, idx) => (
+                <option key={week} value={week}>
+                  สัปดาห์ {week} {idx === 0 ? '(ล่าสุด)' : ''}
+                </option>
+              ))
+            )}
           </select>
         </div>
 

@@ -72,7 +72,7 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
 
   // 4. Filter & Tab States
-  const [selectedWeek, setSelectedWeek] = useState<string>('2026-W47');
+  const [selectedWeek, setSelectedWeek] = useState<string>('');
   const [selectedCycle, setSelectedCycle] = useState<CycleFilter>('all');
   const [selectedCompany, setSelectedCompany] = useState<CompanyTag | 'ALL'>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -88,8 +88,8 @@ export const App: React.FC = () => {
     const weeks = Array.from(new Set(result.items.map((i) => i.week_id)))
       .sort()
       .reverse();
-    if (weeks.length > 0 && !weeks.includes(selectedWeek)) {
-      setSelectedWeek(weeks[0]);
+    if (weeks.length > 0) {
+      setSelectedWeek((prev) => (prev && weeks.includes(prev) ? prev : weeks[0]));
     }
     setLoading(false);
   };
@@ -99,10 +99,9 @@ export const App: React.FC = () => {
   }, []);
 
   const availableWeeks = useMemo(() => {
-    const weeks = Array.from(new Set(allNews.map((item) => item.week_id)))
+    return Array.from(new Set(allNews.map((item) => item.week_id)))
       .sort()
       .reverse();
-    return weeks.length > 0 ? weeks : ['2026-W47'];
   }, [allNews]);
 
   // Filter by week, cycle, bookmark, and keyword search
