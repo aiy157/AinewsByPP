@@ -9,9 +9,7 @@ Architecture Guarantees (aligned with agent-architecture-audit):
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -44,38 +42,6 @@ def extract_text_from_message_content(content_blocks: List[Any]) -> str:
             if text_val:
                 texts.append(str(text_val))
     return "\n".join(texts).strip()
-
-
-def extract_json_payload(raw_text: str) -> Dict[str, Any]:
-    """
-    Deterministically parses a JSON object from an LLM response, stripping optional
-    markdown fences or surrounding prose without invoking a hidden LLM repair call.
-    """
-    cleaned = raw_text.strip()
-
-    # Strip ```json ... ``` fences if present
-    fence_match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", cleaned, re.DOTALL)
-    if fence_match:
-        cleaned = fence_match.group(1).strip()
-
-    # Direct parse attempt
-    try:
-        parsed = json.loads(cleaned)
-        if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
-        pass
-
-    # Balanced brace extraction fallback (deterministic)
-    first_brace = cleaned.find("{")
-    last_brace = cleaned.rfind("}")
-    if first_brace != -1 and last_brace > first_brace:
-        candidate = cleaned[first_brace : last_brace + 1]
-        parsed = json.loads(candidate)
-        if isinstance(parsed, dict):
-            return parsed
-
-    raise ValueError("Unable to extract valid JSON object from Anthropic response.")
 
 
 class AnthropicBatchRunner:
