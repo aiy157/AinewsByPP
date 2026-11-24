@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="960" height="540">
+  <rect width="960" height="540" fill="#1D1610"/>
+  <rect x="18" y="18" width="924" height="504" rx="8" fill="none" stroke="#8A5A19" stroke-width="2" stroke-dasharray="8,6"/>
+  <text x="64" y="76" fill="#F59E0B" font-family="monospace" font-size="13" font-weight="700" letter-spacing="1.5">UNCONFIRMED COMMUNITY ARTIFACT · R/LOCALLLAMA LEAK</text>
+  <text x="64" y="116" fill="#FEF3C7" font-family="system-ui, sans-serif" font-size="24" font-weight="700">Spotted Commit Reference: dsk_r3_zero (vLLM Dev Branch)</text>
+
+  <!-- Code Diff Preview -->
+  <rect x="64" y="152" width="832" height="270" rx="6" fill="#120E0A" stroke="#4B3418" stroke-width="1"/>
+  <text x="92" y="192" fill="#9CA3AF" font-family="monospace" font-size="14">--- a/vllm/model_executor/models/registry.py</text>
+  <text x="92" y="220" fill="#9CA3AF" font-family="monospace" font-size="14">+++ b/vllm/model_executor/models/deepseek_r3.py</text>
+  <text x="92" y="260" fill="#F59E0B" font-family="monospace" font-size="15" font-weight="700">+ "DeepseekR3ZeroForCausalLM": ("dsk_r3_zero", "FineGrainedMoE"),</text>
+  <text x="92" y="294" fill="#FCD34D" font-family="monospace" font-size="15">+ quant_config = NativeFP4Config(group_size=128, act_order=True)</text>
+  <text x="92" y="328" fill="#FCD34D" font-family="monospace" font-size="15">+ active_experts_per_tok = 8  # fine-grained routing</text>
+  <text x="92" y="362" fill="#A1887F" font-family="monospace" font-size="14"># Note: Branch made private shortly after community discovery</text>
+  <text x="92" y="396" fill="#EF4444" font-family="monospace" font-size="13" font-weight="700">STATUS: UNVERIFIED SPECULATION — NO OFFICIAL CONFIRMATION FROM DEEPSEEK</text>
+
+  <text x="64" y="476" fill="#B48C5E" font-family="system-ui, sans-serif" font-size="12">RUMOR RADAR VISUAL RECONSTRUCTION · SOURCE THREAD: R/LOCALLLAMA</text>
+</svg>

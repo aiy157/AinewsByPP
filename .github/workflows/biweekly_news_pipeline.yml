@@ -1,0 +1,87 @@
+name: Ainews Bi-Weekly AI News Pipeline
+
+on:
+  schedule:
+    # Thailand Time (ICT, UTC+7):
+    # - Wednesday 04:15 AM ICT -> Tuesday 21:45 UTC (finishes by 05:00 AM ICT)
+    # - Sunday    04:15 AM ICT -> Saturday 21:45 UTC (finishes by 05:00 AM ICT)
+    # Bi-weekly runs also prevent Supabase Free Tier 7-day inactivity pause.
+    - cron: '45 21 * * 2,6'
+
+  workflow_dispatch:
+    inputs:
+      batch_type:
+        description: 'Run cycle type (auto detects from Thailand ICT day)'
+        required: true
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - midweek
+          - weekend
+      dry_run:
+        description: 'Run in Dry-Run mode (live RSS/Reddit fetch only, $0 AI/DB cost)'
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: ainews-biweekly-pipeline
+  cancel-in-progress: false
+
+jobs:
+  run-news-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12 with pip cache
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: pipeline/requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r pipeline/requirements.txt
+
+      - name: Execute Ainews Pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          STAGE1_MODEL: ${{ vars.STAGE1_MODEL || 'claude-haiku-5-5' }}
+          STAGE2_MODEL: ${{ vars.STAGE2_MODEL || 'claude-opus-5-5' }}
+          STAGE2_THINKING_BUDGET: ${{ vars.STAGE2_THINKING_BUDGET || '4000' }}
+          BATCH_STAGE1_TIMEOUT_SECONDS: '1200'
+          BATCH_STAGE2_TIMEOUT_SECONDS: '1200'
+          BATCH_POLL_INTERVAL_SECONDS: '30'
+          TIMEZONE: 'Asia/Bangkok'
+          MAX_VERIFIED_ITEMS: '125'
+          MAX_RUMOR_ITEMS: '25'
+          STAGE1_MAX_INPUT_TOKENS_PER_CHUNK: '100000'
+          REDDIT_MIN_SCORE: '20'
+          REDDIT_MIN_COMMENTS: '5'
+          ENABLE_OG_IMAGE_FETCH: 'true'
+        run: |
+          ARGS="--batch-type ${{ inputs.batch_type || 'auto' }}"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          python -m pipeline.main $ARGS
+
+      - name: Upload Dry-Run Preview Artifact
+        if: ${{ inputs.dry_run == true && always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ainews-dry-run-preview
+          path: pipeline/data/dry_run_preview.json
+          if-no-files-found: ignore
+          retention-days: 7

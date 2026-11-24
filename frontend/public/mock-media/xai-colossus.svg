@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="960" height="540">
+  <rect width="960" height="540" fill="#161A20"/>
+  <rect x="0" y="0" width="960" height="5" fill="#4A7FB5"/>
+  <text x="64" y="68" fill="#8BB8E8" font-family="system-ui, sans-serif" font-size="12" font-weight="700" letter-spacing="1.6">AI INFRASTRUCTURE BRIEF · XAI COLOSSUS EXPANSION</text>
+  <text x="64" y="108" fill="#F2F0EB" font-family="system-ui, sans-serif" font-size="26" font-weight="700">1.2 GW Dedicated Clean Energy &amp; Liquid Cooling Architecture</text>
+
+  <!-- 3 Flow Nodes -->
+  <rect x="64" y="168" width="240" height="190" rx="8" fill="#1E242E" stroke="#303A4A" stroke-width="1.5"/>
+  <text x="88" y="206" fill="#8BB8E8" font-family="system-ui, sans-serif" font-size="12" font-weight="700">01 GENERATION</text>
+  <text x="88" y="256" fill="#F2F0EB" font-family="Georgia, serif" font-size="40" font-weight="700">1.2 GW</text>
+  <text x="88" y="294" fill="#9CA5B4" font-family="system-ui, sans-serif" font-size="13">Utility-Scale Solar Array</text>
+  <text x="88" y="316" fill="#9CA5B4" font-family="system-ui, sans-serif" font-size="13">+ Industrial Battery Buffer</text>
+
+  <line x1="304" y1="263" x2="360" y2="263" stroke="#4A7FB5" stroke-width="2" stroke-dasharray="5,5"/>
+
+  <rect x="360" y="168" width="240" height="190" rx="8" fill="#1E242E" stroke="#303A4A" stroke-width="1.5"/>
+  <text x="384" y="206" fill="#6EE7B7" font-family="system-ui, sans-serif" font-size="12" font-weight="700">02 THERMAL LOOP</text>
+  <text x="384" y="256" fill="#F2F0EB" font-family="Georgia, serif" font-size="34" font-weight="700">Closed-Loop</text>
+  <text x="384" y="294" fill="#9CA5B4" font-family="system-ui, sans-serif" font-size="13">Direct-to-Chip Liquid Cooling</text>
+  <text x="384" y="316" fill="#9CA5B4" font-family="system-ui, sans-serif" font-size="13">Zero Municipal Grid Strain</text>
+
+  <line x1="600" y1="263" x2="656" y2="263" stroke="#4A7FB5" stroke-width="2" stroke-dasharray="5,5"/>
+
+  <rect x="656" y="168" width="240" height="190" rx="8" fill="#1E242E" stroke="#4A7FB5" stroke-width="1.5"/>
+  <text x="680" y="206" fill="#FBBF24" font-family="system-ui, sans-serif" font-size="12" font-weight="700">03 COST EFFICIENCY</text>
+  <text x="680" y="256" fill="#F2F0EB" font-family="Georgia, serif" font-size="40" font-weight="700">-22%</text>
+  <text x="680" y="294" fill="#9CA5B4" font-family="system-ui, sans-serif" font-size="13">Energy Cost per Training Run</text>
+  <text x="680" y="316" fill="#9CA5B4" font-family="system-ui, sans-serif" font-size="13">24/7 Continuous Compute</text>
+
+  <line x1="64" y1="432" x2="896" y2="432" stroke="#293140" stroke-width="1"/>
+  <text x="64" y="470" fill="#7F8491" font-family="system-ui, sans-serif" font-size="12">SOURCE: XAI OFFICIAL NEWS · TECHCRUNCH INFRASTRUCTURE REPORT</text>
+</svg>

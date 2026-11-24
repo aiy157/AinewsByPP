@@ -1,0 +1,122 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ========================================================================
+     Design Tokens: International Broadsheet Editorial System
+     Light Mode = Archival Warm Paper (zero glare, FT / Economist inspired)
+     Dark Mode  = Restful Graphite Print (warm ivory ink, zero neon halation)
+     ======================================================================== */
+  :root {
+    --bg-canvas: #f7f6f2;
+    --bg-surface: #ffffff;
+    --bg-subtle: #efede7;
+    --ink-primary: #141413;
+    --ink-secondary: #4a4742;
+    --ink-muted: #78736a;
+    --border-rule: #e4e1d8;
+    --border-rule-strong: #c8c3b7;
+
+    /* Multi-dimensional restrained accents */
+    --accent-editorial: #1d4268;
+    --accent-editorial-soft: rgba(29, 66, 104, 0.08);
+    --accent-verified: #166534;
+    --accent-verified-soft: rgba(22, 101, 52, 0.09);
+
+    /* Dedicated Rumor Radar palette (warm ochre/terracotta — distinct from verified) */
+    --accent-rumor: #9a3412;
+    --accent-rumor-soft: rgba(180, 83, 9, 0.11);
+    --bg-rumor-surface: #fdf7ef;
+    --border-rumor: #d99b52;
+  }
+
+  .dark {
+    --bg-canvas: #0f1115;
+    --bg-surface: #161920;
+    --bg-subtle: #1e222c;
+    --ink-primary: #f2f0eb;
+    --ink-secondary: #b5b8c2;
+    --ink-muted: #7f8491;
+    --border-rule: #252a34;
+    --border-rule-strong: #373d4b;
+
+    --accent-editorial: #7cb3e8;
+    --accent-editorial-soft: rgba(124, 179, 232, 0.12);
+    --accent-verified: #4ade80;
+    --accent-verified-soft: rgba(74, 222, 128, 0.11);
+
+    --accent-rumor: #f59e0b;
+    --accent-rumor-soft: rgba(245, 158, 11, 0.14);
+    --bg-rumor-surface: #1b1610;
+    --border-rumor: #8a5a19;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    background-color: var(--bg-canvas);
+    color: var(--ink-primary);
+  }
+
+  body {
+    font-family: "IBM Plex Sans Thai", "Sarabun", system-ui, -apple-system, sans-serif;
+    background-color: var(--bg-canvas);
+    color: var(--ink-primary);
+    line-height: 1.75;
+    transition: background-color 180ms ease, color 180ms ease;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: "Anuphan", "IBM Plex Sans Thai", system-ui, sans-serif;
+  }
+}
+
+/* Editorial typography utilities tuned for Thai vowels & tone marks */
+.thai-headline {
+  font-family: "Anuphan", "IBM Plex Sans Thai", system-ui, sans-serif;
+  line-height: 1.5;
+  letter-spacing: -0.005em;
+}
+
+.thai-prose {
+  font-family: "Sarabun", "IBM Plex Sans Thai", system-ui, sans-serif;
+  line-height: 1.92;
+  letter-spacing: 0.004em;
+}
+
+/* Custom subtle scrollbars for reader modal */
+.editorial-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.editorial-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.editorial-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--border-rule-strong);
+  border-radius: 9999px;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes modalReveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-modal-reveal {
+  animation: modalReveal 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="960" height="540">
+  <rect width="960" height="540" fill="#F4F6F9"/>
+  <rect x="0" y="0" width="960" height="6" fill="#1E40AF"/>
+  <text x="64" y="68" fill="#1E40AF" font-family="system-ui, sans-serif" font-size="12" font-weight="700" letter-spacing="1.6">META AI OPEN-WEIGHT SAFETY RELEASE</text>
+  <text x="64" y="108" fill="#111827" font-family="system-ui, sans-serif" font-size="26" font-weight="700">Llama Guard 4 — Multimodal 4B Safety Firewall</text>
+
+  <!-- Pipeline Flow -->
+  <rect x="64" y="176" width="210" height="148" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1.5"/>
+  <text x="86" y="216" fill="#475569" font-family="system-ui, sans-serif" font-size="12" font-weight="700">MULTIMODAL INPUT</text>
+  <text x="86" y="254" fill="#0F172A" font-family="system-ui, sans-serif" font-size="16" font-weight="700">Text + Image Prompts</text>
+  <text x="86" y="284" fill="#64748B" font-family="system-ui, sans-serif" font-size="13">Prompt Injection Checks</text>
+
+  <line x1="274" y1="250" x2="340" y2="250" stroke="#1E40AF" stroke-width="2"/>
+
+  <rect x="340" y="156" width="280" height="188" rx="8" fill="#1E3A8A"/>
+  <text x="368" y="198" fill="#93C5FD" font-family="system-ui, sans-serif" font-size="12" font-weight="700">GUARDRAIL LAYER (ON-PREMISE)</text>
+  <text x="368" y="242" fill="#FFFFFF" font-family="Georgia, serif" font-size="30" font-weight="700">Llama Guard 4</text>
+  <text x="368" y="280" fill="#DBEAFE" font-family="monospace" font-size="15" font-weight="700">4B Params · 18ms Avg</text>
+  <text x="368" y="308" fill="#BFDBFE" font-family="system-ui, sans-serif" font-size="13">-35% False Positive Rate</text>
+
+  <line x1="620" y1="250" x2="686" y2="250" stroke="#166534" stroke-width="2"/>
+
+  <rect x="686" y="176" width="210" height="148" rx="8" fill="#FFFFFF" stroke="#86EFAC" stroke-width="2"/>
+  <text x="708" y="216" fill="#166534" font-family="system-ui, sans-serif" font-size="12" font-weight="700">VERIFIED SAFE ROUTE</text>
+  <text x="708" y="254" fill="#0F172A" font-family="system-ui, sans-serif" font-size="16" font-weight="700">Primary LLM Engine</text>
+  <text x="708" y="284" fill="#64748B" font-family="system-ui, sans-serif" font-size="13">Zero External API Leak</text>
+
+  <line x1="64" y1="432" x2="896" y2="432" stroke="#CBD5E1" stroke-width="1"/>
+  <text x="64" y="470" fill="#64748B" font-family="system-ui, sans-serif" font-size="12">OPEN-WEIGHT SELF-HOSTABLE LICENSE · SOURCE: META AI OFFICIAL BLOG</text>
+</svg>
