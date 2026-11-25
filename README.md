@@ -7,7 +7,7 @@
 ## System Architecture
 
 ```text
-Daily Schedule (Every day 04:15 AM ICT / cron: 15 21 * * * UTC on GitHub Actions)
+Daily Schedule (Every day 04:23 AM ICT / cron: 23 21 * * * UTC on GitHub Actions)
   │
   ├── Pipe 1: Verified Facts (Max 125 items, status='verified', 28h lookback)
   │     └── 15 RSS Feeds: OpenAI, Anthropic, Google DeepMind/AI, Meta AI, xAI,
@@ -51,7 +51,7 @@ Daily Schedule (Every day 04:15 AM ICT / cron: 15 21 * * * UTC on GitHub Actions
 ```text
 Ainews/
 ├── .github/workflows/
-│   └── daily_news_pipeline.yml      # Daily 04:15 ICT Cron + manual workflow_dispatch
+│   └── daily_news_pipeline.yml      # Daily 04:23 ICT Cron + manual workflow_dispatch
 ├── .agents/skills/                  # Installed workspace Agent Skills
 ├── supabase/
 │   ├── schema.sql                   # Tables (news_items, pipeline_runs), constraints, indexes, RLS
@@ -135,7 +135,7 @@ npm run build     # Production build into frontend/dist
 ## Deployment
 
 ### GitHub Actions (Automated Daily Schedule)
-Runs automatically **every day at 04:15 AM ICT (`15 21 * * *` UTC)** with a 28-hour lookback window + zero-cost URL pre-dedup so summaries are ready by 05:00 AM ICT (and keeps Supabase Free Tier permanently active).
+Runs automatically **every day at 04:23 AM ICT (`23 21 * * *` UTC)** with a 28-hour lookback window + zero-cost URL pre-dedup so summaries are ready by 05:00 AM ICT (and keeps Supabase Free Tier permanently active).
 
 Configure these **Repository Secrets** in `Settings → Secrets and variables → Actions`:
 - `ANTHROPIC_API_KEY`
