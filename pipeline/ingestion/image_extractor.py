@@ -18,6 +18,10 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from bs4 import BeautifulSoup
 
+from pipeline.ingestion.http_safety import (
+    safe_stream_get,
+    validate_public_http_url,
+)
 from pipeline.schemas import RawScrapedItem
 
 logger = logging.getLogger(__name__)
@@ -53,7 +57,8 @@ def is_valid_image_url(url: Optional[str]) -> bool:
     if not url or not isinstance(url, str):
         return False
     cleaned = html.unescape(url.strip())
-    if not cleaned.startswith(("http://", "https://")):
+    # Enforce HTTPS-only public image URLs (blocks cleartext http:, data:, javascript:, private IPs)
+    if not validate_public_http_url(cleaned, require_https=True, resolve_dns=False):
         return False
     lower = cleaned.lower()
     if any(bad in lower for bad in BLOCKED_IMAGE_SUBSTRINGS):
@@ -109,9 +114,11 @@ def extract_image_from_rss_entry(entry: Dict[str, Any], base_url: str = "") -> O
         html_blobs.append(str(entry["summary"]))
 
     for blob in html_blobs:
-        img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', blob, re.IGNORECASE)
-        if img_match:
-            resolved = urljoin(base_url, html.unescape(img_match.group(1)))
+        # Use BeautifulSoup on bounded HTML slice instead of polynomial <img> regex (anti-ReDoS)
+        soup = BeautifulSoup(blob[:100_000], "html.parser")
+        img_tag = soup.find("img", src=True)
+        if img_tag and img_tag.get("src"):
+            resolved = urljoin(base_url, html.unescape(str(img_tag["src"]).strip()))
             if is_valid_image_url(resolved):
                 return resolved
 
@@ -172,36 +179,32 @@ def fetch_og_image_url(
             "User-Agent": user_agent,
             "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
         }
-        chunks: List[bytes] = []
-        max_bytes = 65_536  # Only need HTML <head>
-        total_read = 0
+        result = safe_stream_get(
+            article_url,
+            headers=headers,
+            timeout_seconds=timeout_seconds,
+            max_bytes=65_536,  # Only need HTML <head>
+            max_redirects=3,
+            stop_marker=b"</head>",
+            allowed_content_types=("text/html", "application/xhtml"),
+        )
+        if not result:
+            return None
 
-        with httpx.Client(follow_redirects=True, timeout=timeout_seconds, headers=headers) as client:
-            with client.stream("GET", article_url) as resp:
-                if resp.status_code >= 400:
-                    return None
-                ctype = (resp.headers.get("content-type") or "").lower()
-                if "text/html" not in ctype and "application/xhtml" not in ctype:
-                    return None
-                for chunk in resp.iter_bytes(chunk_size=8192):
-                    chunks.append(chunk)
-                    total_read += len(chunk)
-                    if total_read >= max_bytes or b"</head>" in chunk.lower():
-                        break
-
-        raw_html = b"".join(chunks).decode("utf-8", errors="ignore")
+        final_url, raw_bytes = result
+        raw_html = raw_bytes.decode("utf-8", errors="ignore")
         soup = BeautifulSoup(raw_html, "html.parser")
 
         meta_selectors = [
-            ("meta", {"property": "og:image"}),
             ("meta", {"property": "og:image:secure_url"}),
+            ("meta", {"property": "og:image"}),
             ("meta", {"name": "twitter:image"}),
             ("meta", {"name": "twitter:image:src"}),
         ]
         for tag, attrs in meta_selectors:
             found = soup.find(tag, attrs=attrs)
             if found and found.get("content"):
-                candidate = urljoin(article_url, str(found["content"]).strip())
+                candidate = urljoin(final_url, str(found["content"]).strip())
                 if is_valid_image_url(candidate):
                     return candidate
 

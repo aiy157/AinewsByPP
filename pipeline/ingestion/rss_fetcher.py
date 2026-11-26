@@ -19,6 +19,11 @@ import httpx
 from bs4 import BeautifulSoup
 
 from pipeline.config import ICT_TZ, UTC_TZ, PipelineConfig
+from pipeline.ingestion.http_safety import (
+    matches_allowed_domains,
+    safe_stream_get,
+    validate_public_http_url,
+)
 from pipeline.ingestion.image_extractor import (
     enrich_missing_images_with_og,
     extract_image_from_rss_entry,
@@ -69,10 +74,17 @@ def _fetch_single_rss_source(
             "User-Agent": user_agent,
             "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
         }
-        with httpx.Client(follow_redirects=True, timeout=15.0, headers=headers) as client:
-            resp = client.get(source.url)
-            resp.raise_for_status()
-            feed = feedparser.parse(resp.content)
+        fetched = safe_stream_get(
+            source.url,
+            headers=headers,
+            timeout_seconds=15.0,
+            max_bytes=5_000_000,
+            max_redirects=3,
+        )
+        if not fetched:
+            raise RuntimeError(f"RSS fetch returned empty/blocked response for {source.url}")
+        _, content_bytes = fetched
+        feed = feedparser.parse(content_bytes)
 
         for entry in feed.entries:
             published_utc = _parse_entry_datetime_utc(entry)
@@ -85,7 +97,16 @@ def _fetch_single_rss_source(
 
             title = _clean_html_to_text(str(entry.get("title") or ""), max_chars=300)
             link = str(entry.get("link") or "").strip()
-            if not title or not link.startswith(("http://", "https://")):
+            if not title or not validate_public_http_url(link, resolve_dns=False):
+                continue
+            if source.allowed_link_domains and not matches_allowed_domains(
+                link, source.allowed_link_domains
+            ):
+                logger.warning(
+                    "Dropped untrusted domain link from mirrored feed '%s': %s",
+                    source.name,
+                    link,
+                )
                 continue
 
             # Combine richest available content field

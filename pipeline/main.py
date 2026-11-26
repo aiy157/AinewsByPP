@@ -311,8 +311,12 @@ def run_pipeline(
         # STEP 5: Upsert Curated News, Clear Confirmed Rumors & Log Run
         # ------------------------------------------------------------------
         final_news_count = db.upsert_news_items(week_id, batch_type, final_items)
+        uuid_like = [
+            ref for ref in superseded_rumor_slugs if len(ref) == 36 and ref.count("-") == 4
+        ]
+        slug_like = [ref for ref in superseded_rumor_slugs if ref not in uuid_like]
         removed_rumors_count = (
-            db.delete_superseded_rumors(superseded_rumor_slugs)
+            db.delete_superseded_rumors(slug_like, rumor_ids=uuid_like)
             if superseded_rumor_slugs
             else 0
         )
@@ -383,7 +387,7 @@ def run_pipeline(
             run_status="failed",
             started_at=started_at_utc,
             completed_at=datetime.now(UTC_TZ),
-            error_message=str(exc)[:1000],
+            error_message=f"{type(exc).__name__}: pipeline run failed (inspect private CI logs)",
         )
         return 1
 

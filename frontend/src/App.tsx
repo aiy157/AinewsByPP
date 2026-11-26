@@ -18,17 +18,40 @@ import { TabNavigation } from './components/TabNavigation';
 import { FontScale, NewsCard } from './components/NewsCard';
 import { ReaderModal } from './components/ReaderModal';
 
+function safeGetStorage(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSetStorage(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Ignore storage quota / strict privacy mode errors gracefully
+  }
+}
+
+function parseTimestamp(isoString?: string): number {
+  if (!isoString) return 0;
+  const ms = Date.parse(isoString);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
 function getThaiDayKey(isoString?: string): string {
-  if (!isoString) return '';
+  const ms = parseTimestamp(isoString);
+  if (!ms) return '';
   try {
     return new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Bangkok',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
-    }).format(new Date(isoString));
+    }).format(new Date(ms));
   } catch {
-    return isoString.slice(0, 10);
+    return (isoString ?? '').slice(0, 10);
   }
 }
 
@@ -52,9 +75,9 @@ function formatThaiDayKey(dayKey: string): string {
 }
 
 export const App: React.FC = () => {
-  // 1. Theme State: Archival Paper Light default, persists user preference
+  // 1. Theme State: Archival Paper Light default, safe storage access
   const [isDark, setIsDark] = useState<boolean>(() => {
-    const saved = localStorage.getItem('ainews_theme_v2');
+    const saved = safeGetStorage('ainews_theme_v2');
     return saved ? saved === 'dark' : false;
   });
 
@@ -62,21 +85,23 @@ export const App: React.FC = () => {
     const root = document.documentElement;
     if (isDark) {
       root.classList.add('dark');
-      localStorage.setItem('ainews_theme_v2', 'dark');
+      safeSetStorage('ainews_theme_v2', 'dark');
     } else {
       root.classList.remove('dark');
-      localStorage.setItem('ainews_theme_v2', 'light');
+      safeSetStorage('ainews_theme_v2', 'light');
     }
   }, [isDark]);
 
-  // 2. Reading Preferences & Bookmarks
+  // 2. Reading Preferences & Bookmarks (validated & safely persisted)
   const [fontScale, setFontScale] = useState<FontScale>(() => {
-    const saved = localStorage.getItem('ainews_font_scale') as FontScale | null;
-    return saved || 'normal';
+    const saved = safeGetStorage('ainews_font_scale');
+    return saved === 'normal' || saved === 'large' || saved === 'xlarge'
+      ? saved
+      : 'normal';
   });
 
   useEffect(() => {
-    localStorage.setItem('ainews_font_scale', fontScale);
+    safeSetStorage('ainews_font_scale', fontScale);
   }, [fontScale]);
 
   const [readerItem, setReaderItem] = useState<NewsItem | null>(null);
@@ -84,21 +109,24 @@ export const App: React.FC = () => {
 
   const [bookmarkedIds, setBookmarkedIds] = useState<string[]>(() => {
     try {
-      const raw = localStorage.getItem('ainews_bookmarks');
-      return raw ? (JSON.parse(raw) as string[]) : [];
+      const raw = safeGetStorage('ainews_bookmarks');
+      const parsed: unknown = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed)
+        ? parsed.filter((x): x is string => typeof x === 'string')
+        : [];
     } catch {
       return [];
     }
   });
 
+  useEffect(() => {
+    safeSetStorage('ainews_bookmarks', JSON.stringify(bookmarkedIds));
+  }, [bookmarkedIds]);
+
   const handleToggleBookmark = (id: string) => {
-    setBookmarkedIds((prev) => {
-      const next = prev.includes(id)
-        ? prev.filter((x) => x !== id)
-        : [...prev, id];
-      localStorage.setItem('ainews_bookmarks', JSON.stringify(next));
-      return next;
-    });
+    setBookmarkedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
   };
 
   // 3. Data State
@@ -109,12 +137,12 @@ export const App: React.FC = () => {
 
   // 4. Filter & Tab States (2 Systems: Daily default / Weekly)
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    const saved = localStorage.getItem('ainews_view_mode') as ViewMode | null;
+    const saved = safeGetStorage('ainews_view_mode');
     return saved === 'weekly' || saved === 'daily' ? saved : 'daily';
   });
 
   useEffect(() => {
-    localStorage.setItem('ainews_view_mode', viewMode);
+    safeSetStorage('ainews_view_mode', viewMode);
   }, [viewMode]);
 
   const [selectedDay, setSelectedDay] = useState<string>('');
@@ -176,18 +204,37 @@ export const App: React.FC = () => {
       .reverse();
   }, [allNews]);
 
-  // Filter by viewMode (Daily or Weekly), cycle, bookmark, and keyword search
+  // Sync selectedWeek when switching from Daily -> Weekly so context stays coherent
+  const handleSelectViewMode = (mode: ViewMode) => {
+    if (mode === 'weekly' && selectedDay) {
+      const match = allNews.find((item) => getItemEditionDay(item) === selectedDay);
+      if (match?.week_id) {
+        setSelectedWeek(match.week_id);
+      }
+    }
+    setViewMode(mode);
+  };
+
+  // Count only bookmarks that exist in the loaded dataset (prevents stale mock ID counts)
+  const activeBookmarkedCount = useMemo(() => {
+    if (allNews.length === 0) return 0;
+    const validIdSet = new Set(allNews.map((item) => item.id));
+    return bookmarkedIds.filter((id) => validIdSet.has(id)).length;
+  }, [allNews, bookmarkedIds]);
+
+  // Filter by viewMode (bypassing day/week filters when browsing all Saved Bookmarks), cycle, and search
   const itemsInPeriodAndSearch = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
 
     return allNews.filter((item) => {
-      if (viewMode === 'daily') {
+      if (showOnlyBookmarked) {
+        if (!bookmarkedIds.includes(item.id)) return false;
+      } else if (viewMode === 'daily') {
         if (selectedDay && getItemEditionDay(item) !== selectedDay) return false;
       } else {
         if (selectedWeek && item.week_id !== selectedWeek) return false;
         if (selectedCycle !== 'all' && item.batch_type !== selectedCycle) return false;
       }
-      if (showOnlyBookmarked && !bookmarkedIds.includes(item.id)) return false;
 
       if (q.length > 0) {
         const inTitle = item.title_th.toLowerCase().includes(q);
@@ -236,25 +283,16 @@ export const App: React.FC = () => {
     return counts;
   }, [itemsInPeriodAndSearch]);
 
-  // Identify the latest daily fetch edition within the active week (for "ใหม่" badge)
-  const { latestEditionDay, hasMultipleEditionDays } = useMemo(() => {
-    const days = Array.from(
-      new Set(itemsInPeriodAndSearch.map((item) => getItemEditionDay(item)).filter(Boolean))
-    )
-      .sort()
-      .reverse();
-    return {
-      latestEditionDay: days[0] ?? '',
-      hasMultipleEditionDays: days.length > 1,
-    };
-  }, [itemsInPeriodAndSearch]);
+  // Anchor "ใหม่" badge globally to the newest fetched edition day (never firing on archived weeks)
+  const newestGlobalEditionDay = availableDays[0]?.key ?? '';
+  const hasMultipleGlobalDays = availableDays.length > 1;
 
   const isItemInLatestBatch = (item: NewsItem): boolean =>
-    viewMode === 'weekly' &&
-    hasMultipleEditionDays &&
-    getItemEditionDay(item) === latestEditionDay;
+    (viewMode === 'weekly' || showOnlyBookmarked) &&
+    hasMultipleGlobalDays &&
+    getItemEditionDay(item) === newestGlobalEditionDay;
 
-  // Apply company filter + sort
+  // Apply company filter + NaN-safe sort
   const filteredAndSortedItems = useMemo(() => {
     const matched = itemsInPeriodAndSearch.filter((item) => {
       if (selectedCompany === 'ALL') return true;
@@ -262,8 +300,9 @@ export const App: React.FC = () => {
     });
 
     return [...matched].sort((a, b) => {
+      const timeDiff = parseTimestamp(b.published_at) - parseTimestamp(a.published_at);
       if (sortOrder === 'latest') {
-        if (viewMode === 'weekly') {
+        if (viewMode === 'weekly' || showOnlyBookmarked) {
           const dayA = getItemEditionDay(a);
           const dayB = getItemEditionDay(b);
           if (dayB !== dayA) {
@@ -272,13 +311,9 @@ export const App: React.FC = () => {
           if (b.importance_score !== a.importance_score) {
             return b.importance_score - a.importance_score;
           }
-          return (
-            new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
-          );
+          return timeDiff;
         }
         // Daily mode + 'latest': newest published timestamp first, importance as tie-breaker
-        const timeDiff =
-          new Date(b.published_at).getTime() - new Date(a.published_at).getTime();
         if (timeDiff !== 0) return timeDiff;
         return b.importance_score - a.importance_score;
       }
@@ -286,11 +321,9 @@ export const App: React.FC = () => {
       if (b.importance_score !== a.importance_score) {
         return b.importance_score - a.importance_score;
       }
-      return (
-        new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
-      );
+      return timeDiff;
     });
-  }, [itemsInPeriodAndSearch, selectedCompany, sortOrder, viewMode]);
+  }, [itemsInPeriodAndSearch, selectedCompany, sortOrder, viewMode, showOnlyBookmarked]);
 
   const verifiedItems = useMemo(
     () => filteredAndSortedItems.filter((i) => i.status === 'verified'),
@@ -332,17 +365,30 @@ export const App: React.FC = () => {
     );
   }, [verifiedItems, activeVerifiedCategoryMeta]);
 
-  // Active viewable list for Prev/Next story switching inside ReaderModal
+  const leadVerifiedStory = verifiedItems[0] ?? null;
+
+  // Active viewable list matching exact visual render order for Prev/Next in ReaderModal
   const activeViewableList = useMemo(() => {
     if (activeVerifiedCategoryMeta) return currentTabVerifiedItems;
     if (activeTab === 'rumor_radar') return rumorItems;
-    return filteredAndSortedItems;
+    const ordered: NewsItem[] = [];
+    if (leadVerifiedStory) ordered.push(leadVerifiedStory);
+    for (const cat of VERIFIED_CATEGORIES) {
+      ordered.push(
+        ...verifiedItems.filter(
+          (i) => i.category === cat.id && i.id !== leadVerifiedStory?.id
+        )
+      );
+    }
+    ordered.push(...rumorItems);
+    return ordered;
   }, [
     activeVerifiedCategoryMeta,
     currentTabVerifiedItems,
     activeTab,
     rumorItems,
-    filteredAndSortedItems,
+    leadVerifiedStory,
+    verifiedItems,
   ]);
 
   const readerIndex = useMemo(() => {
@@ -350,12 +396,30 @@ export const App: React.FC = () => {
     return activeViewableList.findIndex((i) => i.id === readerItem.id);
   }, [readerItem, activeViewableList]);
 
-  const leadVerifiedStory = verifiedItems[0] ?? null;
+  const hasActiveFilters =
+    selectedCompany !== 'ALL' ||
+    searchQuery.trim().length > 0 ||
+    (viewMode === 'weekly' && selectedCycle !== 'all') ||
+    showOnlyBookmarked;
 
-  const editionBadgeLabel =
-    viewMode === 'daily'
-      ? `DAILY · ${selectedDay ? formatThaiDayKey(selectedDay) : '—'}`
-      : `ISSUE ${selectedWeek || '—'}`;
+  const resetAllFilters = () => {
+    setSelectedCompany('ALL');
+    setSearchQuery('');
+    setSelectedCycle('all');
+    setShowOnlyBookmarked(false);
+  };
+
+  const handleGoHome = () => {
+    setActiveTab('overview');
+    setShowOnlyBookmarked(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const editionBadgeLabel = showOnlyBookmarked
+    ? `SAVED · ${activeBookmarkedCount} ข่าว`
+    : viewMode === 'daily'
+    ? `DAILY · ${selectedDay ? formatThaiDayKey(selectedDay) : '—'}`
+    : `ISSUE ${selectedWeek || '—'}`;
 
   return (
     <div className="min-h-screen flex flex-col bg-canvas text-ink-primary">
@@ -364,16 +428,19 @@ export const App: React.FC = () => {
         isDark={isDark}
         onToggleTheme={() => setIsDark((prev) => !prev)}
         dataSource={dataSource}
+        loading={loading}
         totalVerified={verifiedItems.length}
         totalRumors={rumorItems.length}
+        viewMode={viewMode}
         editionBadgeLabel={editionBadgeLabel}
         fontScale={fontScale}
         onChangeFontScale={setFontScale}
-        bookmarkedCount={bookmarkedIds.length}
+        bookmarkedCount={activeBookmarkedCount}
         showOnlyBookmarked={showOnlyBookmarked}
         onToggleShowOnlyBookmarked={() =>
           setShowOnlyBookmarked((prev) => !prev)
         }
+        onGoHome={handleGoHome}
       />
 
       {/* Single-Line Broadsheet Section Tabs */}
@@ -385,6 +452,22 @@ export const App: React.FC = () => {
 
       {/* Main Content Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        {/* Saved Bookmarks Cross-Edition Banner */}
+        {showOnlyBookmarked && (
+          <div className="px-4 py-2.5 rounded-md bg-editorial-soft border border-editorial/30 text-xs text-ink-secondary flex items-center justify-between gap-3">
+            <span>
+              กำลังแสดง<strong className="text-ink-primary font-semibold">ข่าวที่บันทึกไว้ทั้งหมดทุกวัน/สัปดาห์</strong> ({activeBookmarkedCount} รายการ)
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowOnlyBookmarked(false)}
+              className="font-semibold text-editorial hover:underline shrink-0"
+            >
+              กลับไปดูข่าวตามปกติ
+            </button>
+          </div>
+        )}
+
         {/* Optional Connection Fallback Notice */}
         {statusNotice && (
           <div className="px-4 py-2 rounded-md bg-rumor-surface border border-rumor-border/60 text-xs text-ink-secondary flex items-center justify-between gap-3">
@@ -403,7 +486,7 @@ export const App: React.FC = () => {
         {/* Streamlined Utility Filter Bar (Daily / Weekly 2-System Switcher) */}
         <FilterBar
           viewMode={viewMode}
-          onSelectViewMode={setViewMode}
+          onSelectViewMode={handleSelectViewMode}
           availableDays={availableDays}
           selectedDay={selectedDay}
           onSelectDay={setSelectedDay}
@@ -434,17 +517,29 @@ export const App: React.FC = () => {
               <>
                 {filteredAndSortedItems.length === 0 ? (
                   <EmptyState
-                    onReset={() => {
-                      setSelectedCompany('ALL');
-                      setSearchQuery('');
-                      setSelectedCycle('all');
-                      setShowOnlyBookmarked(false);
-                    }}
+                    viewMode={viewMode}
+                    hasActiveFilters={hasActiveFilters}
+                    showOnlyBookmarked={showOnlyBookmarked}
+                    isDedicatedTab={false}
+                    onResetFilters={resetAllFilters}
+                    onGoHome={handleGoHome}
+                    onSwitchToWeekly={() => handleSelectViewMode('weekly')}
                   />
                 ) : (
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
                     {/* Left Primary Column (~75-80% Desktop Width): Verified Facts */}
                     <div className="lg:col-span-8 xl:col-span-9 space-y-10">
+                      {/* Notice when only Rumor Radar matches the current search/filter */}
+                      {verifiedItems.length === 0 && rumorItems.length > 0 && (
+                        <div className="p-6 rounded-lg border border-dashed border-rule-strong bg-surface/60 text-center space-y-1.5">
+                          <p className="text-sm font-semibold text-ink-primary">
+                            ไม่พบข่าวทางการที่ตรงกับเงื่อนไขใน{viewMode === 'daily' ? 'วันนี้' : 'สัปดาห์นี้'}
+                          </p>
+                          <p className="text-xs text-ink-secondary">
+                            แต่พบ <strong className="text-rumor">{rumorItems.length} ประเด็น</strong> ในคอลัมน์ Rumor Radar ด้านขวา
+                          </p>
+                        </div>
+                      )}
                       {/* Lead Feature Story */}
                       {leadVerifiedStory && (
                         <section
@@ -598,12 +693,13 @@ export const App: React.FC = () => {
 
                 {currentTabVerifiedItems.length === 0 ? (
                   <EmptyState
-                    onReset={() => {
-                      setSelectedCompany('ALL');
-                      setSearchQuery('');
-                      setSelectedCycle('all');
-                      setShowOnlyBookmarked(false);
-                    }}
+                    viewMode={viewMode}
+                    hasActiveFilters={hasActiveFilters}
+                    showOnlyBookmarked={showOnlyBookmarked}
+                    isDedicatedTab
+                    onResetFilters={resetAllFilters}
+                    onGoHome={handleGoHome}
+                    onSwitchToWeekly={() => handleSelectViewMode('weekly')}
                   />
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
@@ -647,12 +743,13 @@ export const App: React.FC = () => {
 
                 {rumorItems.length === 0 ? (
                   <EmptyState
-                    onReset={() => {
-                      setSelectedCompany('ALL');
-                      setSearchQuery('');
-                      setSelectedCycle('all');
-                      setShowOnlyBookmarked(false);
-                    }}
+                    viewMode={viewMode}
+                    hasActiveFilters={hasActiveFilters}
+                    showOnlyBookmarked={showOnlyBookmarked}
+                    isDedicatedTab
+                    onResetFilters={resetAllFilters}
+                    onGoHome={handleGoHome}
+                    onSwitchToWeekly={() => handleSelectViewMode('weekly')}
                   />
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
@@ -719,24 +816,70 @@ export const App: React.FC = () => {
 };
 
 interface EmptyStateProps {
-  onReset: () => void;
+  viewMode: ViewMode;
+  hasActiveFilters: boolean;
+  showOnlyBookmarked: boolean;
+  isDedicatedTab: boolean;
+  onResetFilters: () => void;
+  onGoHome: () => void;
+  onSwitchToWeekly: () => void;
 }
 
-const EmptyState: React.FC<EmptyStateProps> = ({ onReset }) => (
+const EmptyState: React.FC<EmptyStateProps> = ({
+  viewMode,
+  hasActiveFilters,
+  showOnlyBookmarked,
+  isDedicatedTab,
+  onResetFilters,
+  onGoHome,
+  onSwitchToWeekly,
+}) => (
   <div className="py-16 px-4 rounded-lg border border-dashed border-rule-strong text-center space-y-2.5 bg-surface/50">
     <Inbox className="w-7 h-7 text-ink-muted mx-auto" />
     <p className="text-sm font-semibold text-ink-primary">
-      ไม่พบข่าวที่ตรงกับเงื่อนไขที่เลือก
+      {showOnlyBookmarked
+        ? 'ยังไม่มีข่าวที่บันทึกไว้ในรายการนี้'
+        : hasActiveFilters
+        ? 'ไม่พบข่าวที่ตรงกับเงื่อนไขที่เลือก'
+        : viewMode === 'daily'
+        ? 'ยังไม่มีข่าวในหมวดนี้สำหรับวันที่เลือก'
+        : 'ยังไม่มีข่าวในหมวดนี้สำหรับสัปดาห์ที่เลือก'}
     </p>
     <p className="text-xs text-ink-muted">
-      ลองปรับตัวกรองค่าย AI คำค้นหา หรือสลับสัปดาห์ด้านบน
+      {showOnlyBookmarked
+        ? 'กดไอคอนบุ๊กมาร์กบนการ์ดข่าวใดก็ได้เพื่อเก็บไว้อ่านภายหลัง'
+        : viewMode === 'daily'
+        ? 'ลองสลับเป็นโหมดรายสัปดาห์ เปลี่ยนวันที่ หรือกลับไปดูหน้าแรกทั้งหมด'
+        : 'ลองปรับตัวกรองค่าย AI คำค้นหา หรือสลับสัปดาห์ด้านบน'}
     </p>
-    <button
-      type="button"
-      onClick={onReset}
-      className="mt-2 inline-flex items-center h-8 px-3.5 rounded-md text-xs font-semibold bg-ink-primary text-canvas hover:opacity-90 transition-opacity"
-    >
-      ล้างตัวกรองทั้งหมด
-    </button>
+    <div className="pt-2 flex flex-wrap items-center justify-center gap-2">
+      {hasActiveFilters && (
+        <button
+          type="button"
+          onClick={onResetFilters}
+          className="inline-flex items-center h-8 px-3.5 rounded-md text-xs font-semibold bg-ink-primary text-canvas hover:opacity-90 transition-opacity"
+        >
+          ล้างตัวกรองทั้งหมด
+        </button>
+      )}
+      {viewMode === 'daily' && !showOnlyBookmarked && (
+        <button
+          type="button"
+          onClick={onSwitchToWeekly}
+          className="inline-flex items-center h-8 px-3.5 rounded-md text-xs font-semibold border border-rule-strong bg-surface text-ink-primary hover:bg-subtle transition-colors"
+        >
+          สลับดูแบบรายสัปดาห์
+        </button>
+      )}
+      {isDedicatedTab && (
+        <button
+          type="button"
+          onClick={onGoHome}
+          className="inline-flex items-center h-8 px-3.5 rounded-md text-xs font-semibold border border-rule-strong bg-surface text-ink-primary hover:bg-subtle transition-colors"
+        >
+          กลับหน้าแรกทั้งหมด
+        </button>
+      )}
+    </div>
   </div>
 );

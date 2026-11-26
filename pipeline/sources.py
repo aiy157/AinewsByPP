@@ -17,6 +17,7 @@ class RssSource:
     is_official: bool
     default_company_tag: CompanyTag
     priority_weight: int = 1  # Higher weight prioritized when capping to 125 items
+    allowed_link_domains: Tuple[str, ...] = ()  # Enforced on third-party mirrors to prevent link injection
 
 
 # Pipe 1: Verified Fact Sources (Direct RSS Feeds — no keyword filtering per Decision 3B)
@@ -35,6 +36,7 @@ VERIFIED_RSS_SOURCES: List[RssSource] = [
         is_official=True,
         default_company_tag="Anthropic",
         priority_weight=3,
+        allowed_link_domains=("anthropic.com",),
     ),
     RssSource(
         name="Anthropic Engineering Blog",
@@ -42,6 +44,7 @@ VERIFIED_RSS_SOURCES: List[RssSource] = [
         is_official=True,
         default_company_tag="Anthropic",
         priority_weight=3,
+        allowed_link_domains=("anthropic.com",),
     ),
     RssSource(
         name="Google DeepMind Blog",
@@ -70,6 +73,7 @@ VERIFIED_RSS_SOURCES: List[RssSource] = [
         is_official=True,
         default_company_tag="xAI",
         priority_weight=3,
+        allowed_link_domains=("x.ai",),
     ),
     RssSource(
         name="DeepSeek Official Releases (GitHub)",

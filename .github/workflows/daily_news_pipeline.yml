@@ -1,5 +1,8 @@
 name: Ainews Daily AI News Pipeline
 
+permissions:
+  contents: read
+
 on:
   # Triggered reliably every day at 04:15 AM ICT via external scheduler (cron-job.org)
   # calling GitHub REST API `/dispatches` (avoids GitHub native cron multi-hour delays).
@@ -16,7 +19,7 @@ on:
           - midweek
           - weekend
       lookback_hours:
-        description: 'Lookback window in hours (default 28h = 24h + 4h overlap buffer)'
+        description: 'Lookback window in hours (1-168, default 28h = 24h + 4h overlap buffer)'
         required: false
         default: '28'
         type: string
@@ -51,8 +54,41 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r pipeline/requirements.txt
 
-      - name: Execute Ainews Daily Pipeline
+      - name: Execute Ainews Dry-Run (No Write Secrets)
+        if: ${{ inputs.dry_run == true }}
         env:
+          INPUT_BATCH_TYPE: ${{ inputs.batch_type || 'auto' }}
+          INPUT_LOOKBACK_HOURS: ${{ inputs.lookback_hours }}
+          STAGE1_MODEL: ${{ vars.STAGE1_MODEL || 'claude-haiku-5-5' }}
+          STAGE2_MODEL: ${{ vars.STAGE2_MODEL || 'claude-sonnet-5-5' }}
+          DEFAULT_LOOKBACK_HOURS: '28'
+          DEDUP_LOOKBACK_DAYS: '7'
+          TIMEZONE: 'Asia/Bangkok'
+          MAX_VERIFIED_ITEMS: '125'
+          MAX_RUMOR_ITEMS: '25'
+          STAGE1_MAX_INPUT_TOKENS_PER_CHUNK: '100000'
+          ENABLE_OG_IMAGE_FETCH: 'true'
+        run: |
+          set -euo pipefail
+          case "$INPUT_BATCH_TYPE" in
+            auto|midweek|weekend) ;;
+            *) echo "Invalid batch_type" >&2; exit 1 ;;
+          esac
+          args=(--batch-type "$INPUT_BATCH_TYPE" --dry-run)
+          if [ -n "$INPUT_LOOKBACK_HOURS" ]; then
+            if [[ ! "$INPUT_LOOKBACK_HOURS" =~ ^[0-9]{1,3}$ ]] || (( INPUT_LOOKBACK_HOURS < 1 || INPUT_LOOKBACK_HOURS > 168 )); then
+              echo "Invalid lookback_hours (must be integer 1..168)" >&2
+              exit 1
+            fi
+            args+=(--lookback-hours "$INPUT_LOOKBACK_HOURS")
+          fi
+          python -m pipeline.main "${args[@]}"
+
+      - name: Execute Ainews Daily Pipeline (Production)
+        if: ${{ inputs.dry_run != true }}
+        env:
+          INPUT_BATCH_TYPE: ${{ inputs.batch_type || 'auto' }}
+          INPUT_LOOKBACK_HOURS: ${{ inputs.lookback_hours }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -74,14 +110,20 @@ jobs:
           REDDIT_MIN_COMMENTS: '5'
           ENABLE_OG_IMAGE_FETCH: 'true'
         run: |
-          ARGS="--batch-type ${{ inputs.batch_type || 'auto' }}"
-          if [ -n "${{ inputs.lookback_hours }}" ]; then
-            ARGS="$ARGS --lookback-hours ${{ inputs.lookback_hours }}"
+          set -euo pipefail
+          case "$INPUT_BATCH_TYPE" in
+            auto|midweek|weekend) ;;
+            *) echo "Invalid batch_type" >&2; exit 1 ;;
+          esac
+          args=(--batch-type "$INPUT_BATCH_TYPE")
+          if [ -n "$INPUT_LOOKBACK_HOURS" ]; then
+            if [[ ! "$INPUT_LOOKBACK_HOURS" =~ ^[0-9]{1,3}$ ]] || (( INPUT_LOOKBACK_HOURS < 1 || INPUT_LOOKBACK_HOURS > 168 )); then
+              echo "Invalid lookback_hours (must be integer 1..168)" >&2
+              exit 1
+            fi
+            args+=(--lookback-hours "$INPUT_LOOKBACK_HOURS")
           fi
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            ARGS="$ARGS --dry-run"
-          fi
-          python -m pipeline.main $ARGS
+          python -m pipeline.main "${args[@]}"
 
       - name: Upload Dry-Run Preview Artifact
         if: ${{ inputs.dry_run == true && always() }}

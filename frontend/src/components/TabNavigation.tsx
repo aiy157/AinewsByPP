@@ -24,10 +24,10 @@ export const TabNavigation: React.FC<TabNavigationProps> = ({
   const isRumorActive = activeTab === 'rumor_radar';
 
   return (
-    <div className="bg-surface border-b border-rule">
+    <div className="relative bg-surface border-b border-rule">
       <nav
         aria-label="หมวดหมู่ข่าว"
-        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4 overflow-x-auto no-scrollbar"
+        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4 overflow-x-auto no-scrollbar pr-8 sm:pr-6 lg:pr-8"
       >
         {/* Left: Verified Editorial Beats */}
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
@@ -37,6 +37,7 @@ export const TabNavigation: React.FC<TabNavigationProps> = ({
               <button
                 key={tab.id}
                 type="button"
+                aria-current={isActive ? 'page' : undefined}
                 onClick={() => onSelectTab(tab.id)}
                 className={`relative h-12 px-2.5 sm:px-3.5 inline-flex items-center gap-2 text-sm whitespace-nowrap transition-colors ${
                   isActive
@@ -66,6 +67,7 @@ export const TabNavigation: React.FC<TabNavigationProps> = ({
         <div className="flex items-center pl-3 border-l border-rule shrink-0">
           <button
             type="button"
+            aria-current={isRumorActive ? 'page' : undefined}
             onClick={() => onSelectTab('rumor_radar')}
             className={`relative h-12 px-3 inline-flex items-center gap-2 text-sm whitespace-nowrap transition-colors ${
               isRumorActive
@@ -84,6 +86,11 @@ export const TabNavigation: React.FC<TabNavigationProps> = ({
           </button>
         </div>
       </nav>
+      {/* Mobile subtle horizontal-scroll fade indicator */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none sm:hidden absolute inset-y-0 right-0 w-7 bg-gradient-to-l from-surface to-transparent"
+      />
     </div>
   );
 };

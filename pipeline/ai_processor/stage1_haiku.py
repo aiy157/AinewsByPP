@@ -18,6 +18,7 @@ from pipeline.ai_processor.batch_client import (
     BatchExecutionResult,
 )
 from pipeline.config import PROJECT_ROOT, PipelineConfig, estimate_tokens
+from pipeline.ingestion.http_safety import is_official_domain as _is_official_domain
 from pipeline.prompts import (
     build_stage1_message_params,
     parse_and_audit_stage1,
@@ -27,24 +28,8 @@ from pipeline.schemas import (
     RawScrapedItem,
     Stage1ClusterItem,
 )
-from pipeline.sources import OFFICIAL_DOMAIN_SUFFIXES
 
 logger = logging.getLogger(__name__)
-
-
-def _is_official_domain(url: str) -> bool:
-    lower = url.lower()
-    parsed = urlparse(lower)
-    host_path = f"{parsed.hostname or ''}{parsed.path}"
-    for suffix in OFFICIAL_DOMAIN_SUFFIXES:
-        if "/" in suffix:
-            if suffix in host_path:
-                return True
-        else:
-            host = parsed.hostname or ""
-            if host == suffix or host.endswith("." + suffix):
-                return True
-    return False
 
 
 def _recover_truncated_stage1_json(raw_text: str) -> str:

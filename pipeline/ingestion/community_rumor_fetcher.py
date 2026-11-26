@@ -19,10 +19,14 @@ import feedparser
 import httpx
 
 from pipeline.config import ICT_TZ, UTC_TZ, PipelineConfig
+from pipeline.ingestion.http_safety import (
+    is_official_domain,
+    safe_stream_get,
+    validate_public_http_url,
+)
 from pipeline.ingestion.image_extractor import enrich_missing_images_with_og
 from pipeline.ingestion.reddit_fetcher import fetch_rumor_reddit_items
 from pipeline.schemas import RawScrapedItem
-from pipeline.sources import OFFICIAL_DOMAIN_SUFFIXES
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +62,7 @@ def _clean_text(text: str, max_chars: int = 2400) -> str:
 
 
 def _is_official_url(url: str) -> bool:
-    lower = (url or "").lower()
-    return any(dom in lower for dom in OFFICIAL_DOMAIN_SUFFIXES)
+    return is_official_domain(url)
 
 
 def _fetch_hacker_news_rumors(
@@ -110,8 +113,8 @@ def _fetch_hacker_news_rumors(
                 hits = resp.json().get("hits") or []
 
                 for hit in hits:
-                    obj_id = str(hit.get("objectID") or "")
-                    if not obj_id or obj_id in seen_ids:
+                    obj_id = str(hit.get("objectID") or "").strip()
+                    if not obj_id or not obj_id.isdigit() or obj_id in seen_ids:
                         continue
 
                     title = _clean_text(str(hit.get("title") or ""), max_chars=300)
@@ -187,10 +190,17 @@ def _fetch_lobsters_ai_community(
     headers = {"User-Agent": config.http_user_agent}
 
     try:
-        with httpx.Client(follow_redirects=True, timeout=12.0, headers=headers) as client:
-            resp = client.get(url)
-            resp.raise_for_status()
-            feed = feedparser.parse(resp.content)
+        fetched = safe_stream_get(
+            url,
+            headers=headers,
+            timeout_seconds=12.0,
+            max_bytes=5_000_000,
+            max_redirects=3,
+        )
+        if not fetched:
+            return matched
+        _, content_bytes = fetched
+        feed = feedparser.parse(content_bytes)
 
         for entry in feed.entries:
             ts_struct = entry.get("published_parsed") or entry.get("updated_parsed")
@@ -203,7 +213,7 @@ def _fetch_lobsters_ai_community(
             title = _clean_text(str(entry.get("title") or ""), max_chars=300)
             link = str(entry.get("comments") or entry.get("link") or "").strip()
             ext_link = str(entry.get("link") or "").strip()
-            if not title or not link.startswith(("http://", "https://")):
+            if not title or not validate_public_http_url(link, resolve_dns=False):
                 continue
             if ext_link and _is_official_url(ext_link):
                 continue

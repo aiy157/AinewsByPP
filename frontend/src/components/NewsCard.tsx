@@ -10,6 +10,7 @@ import {
   VERIFIED_CATEGORIES,
   VerifiedCategory,
 } from '../types/news';
+import { getSafeImageUrl } from '../lib/urlSafety';
 import { RichThaiText } from './RichThaiText';
 
 export type FontScale = 'normal' | 'large' | 'xlarge';
@@ -80,7 +81,8 @@ export const NewsCard: React.FC<NewsCardProps> = ({
   }, [item.id, item.image_url]);
 
   const isRumor = item.status === 'rumor';
-  const hasVisibleImage = Boolean(item.image_url && !imageFailed);
+  const safeImageUrl = getSafeImageUrl(item.image_url, true);
+  const hasVisibleImage = Boolean(safeImageUrl && !imageFailed);
 
   const categoryLabel =
     item.category && CATEGORY_LABELS[item.category]
@@ -91,8 +93,10 @@ export const NewsCard: React.FC<NewsCardProps> = ({
   const primarySource =
     item.source_urls.find((s) => s.is_official) ?? item.source_urls[0];
   const extraSourcesCount = Math.max(0, item.source_urls.length - 1);
+  const companyLabel = item.company_tags.length > 0 ? item.company_tags.join(' / ') : '';
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return;
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       onOpenReader(item);
@@ -126,19 +130,23 @@ export const NewsCard: React.FC<NewsCardProps> = ({
               <div className="flex items-start justify-between gap-2 mb-3">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] tracking-wide">
                   {isLatestBatch && (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider bg-editorial/12 text-editorial">
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider bg-editorial-soft text-editorial">
                       ใหม่
                     </span>
                   )}
                   <span className="font-bold text-editorial">
                     {categoryLabel}
                   </span>
-                  <span aria-hidden="true" className="text-rule-strong">
-                    ·
-                  </span>
-                  <span className="font-semibold text-ink-secondary">
-                    {item.company_tags.join(' / ')}
-                  </span>
+                  {companyLabel && (
+                    <>
+                      <span aria-hidden="true" className="text-rule-strong">
+                        ·
+                      </span>
+                      <span className="font-semibold text-ink-secondary">
+                        {companyLabel}
+                      </span>
+                    </>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
@@ -154,11 +162,14 @@ export const NewsCard: React.FC<NewsCardProps> = ({
                       e.stopPropagation();
                       onToggleBookmark(item.id);
                     }}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    aria-pressed={isBookmarked}
                     aria-label={isBookmarked ? 'นำออกจากที่บันทึกไว้' : 'บันทึกข่าวนี้'}
-                    className={`p-1 rounded transition-colors ${
+                    title={isBookmarked ? 'นำออกจากที่บันทึกไว้' : 'บันทึกไว้อ่านภายหลัง'}
+                    className={`p-2 -m-1 rounded transition-colors ${
                       isBookmarked
                         ? 'text-editorial'
-                        : 'text-ink-muted/60 hover:text-ink-primary'
+                        : 'text-ink-muted hover:text-ink-primary'
                     }`}
                   >
                     <Bookmark
@@ -169,13 +180,13 @@ export const NewsCard: React.FC<NewsCardProps> = ({
               </div>
 
               <h3
-                className={`thai-headline font-bold text-ink-primary group-hover:text-editorial transition-colors mb-3 ${FEATURED_HEADLINE_SCALE[fontScale]}`}
+                className={`thai-headline break-words font-bold text-ink-primary group-hover:text-editorial transition-colors mb-3 ${FEATURED_HEADLINE_SCALE[fontScale]}`}
               >
                 <RichThaiText text={item.title_th} variant="headline" />
               </h3>
 
               <p
-                className={`thai-prose text-ink-secondary line-clamp-3 mb-4 ${TEASER_SCALE[fontScale]}`}
+                className={`thai-prose break-words text-ink-secondary line-clamp-3 mb-4 ${TEASER_SCALE[fontScale]}`}
               >
                 {teaserText}
               </p>
@@ -200,14 +211,16 @@ export const NewsCard: React.FC<NewsCardProps> = ({
             <div className="flex items-center justify-between gap-3 text-[11px] text-ink-muted">
               <div className="flex items-center gap-1.5 min-w-0 truncate">
                 {primarySource && (
-                  <span className="font-medium text-ink-secondary truncate">
-                    {primarySource.title}
-                    {extraSourcesCount > 0 ? ` +${extraSourcesCount}` : ''}
-                  </span>
+                  <>
+                    <span className="font-medium text-ink-secondary truncate">
+                      {primarySource.title}
+                      {extraSourcesCount > 0 ? ` +${extraSourcesCount}` : ''}
+                    </span>
+                    <span aria-hidden="true" className="text-rule-strong">
+                      ·
+                    </span>
+                  </>
                 )}
-                <span aria-hidden="true" className="text-rule-strong">
-                  ·
-                </span>
                 <span className="shrink-0">
                   {formatThaiDate(item.published_at)}
                 </span>
@@ -225,7 +238,7 @@ export const NewsCard: React.FC<NewsCardProps> = ({
             <figure className="md:col-span-5 space-y-1.5">
               <div className="aspect-[16/9] w-full rounded-md overflow-hidden border border-rule bg-subtle">
                 <img
-                  src={item.image_url!}
+                  src={safeImageUrl!}
                   alt={item.title_th}
                   loading="lazy"
                   referrerPolicy="no-referrer"
@@ -265,7 +278,7 @@ export const NewsCard: React.FC<NewsCardProps> = ({
         {hasVisibleImage && (
           <div className="aspect-[16/9] w-full overflow-hidden border-b border-rule/80 bg-subtle">
             <img
-              src={item.image_url!}
+              src={safeImageUrl!}
               alt={item.title_th}
               loading="lazy"
               referrerPolicy="no-referrer"
@@ -284,8 +297,8 @@ export const NewsCard: React.FC<NewsCardProps> = ({
                 <span
                   className={`px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider ${
                     isRumor
-                      ? 'bg-rumor/15 text-rumor'
-                      : 'bg-editorial/12 text-editorial'
+                      ? 'bg-rumor-soft text-rumor'
+                      : 'bg-editorial-soft text-editorial'
                   }`}
                 >
                   ใหม่
@@ -300,13 +313,16 @@ export const NewsCard: React.FC<NewsCardProps> = ({
                 <span className="font-bold text-editorial">{categoryLabel}</span>
               )}
 
-              <span aria-hidden="true" className="text-rule-strong">
-                ·
-              </span>
-
-              <span className="font-semibold text-ink-secondary truncate">
-                {item.company_tags.join(' / ')}
-              </span>
+              {companyLabel && (
+                <>
+                  <span aria-hidden="true" className="text-rule-strong">
+                    ·
+                  </span>
+                  <span className="font-semibold text-ink-secondary truncate">
+                    {companyLabel}
+                  </span>
+                </>
+              )}
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
@@ -324,12 +340,14 @@ export const NewsCard: React.FC<NewsCardProps> = ({
                   e.stopPropagation();
                   onToggleBookmark(item.id);
                 }}
+                onKeyDown={(e) => e.stopPropagation()}
+                aria-pressed={isBookmarked}
                 aria-label={isBookmarked ? 'นำออกจากที่บันทึกไว้' : 'บันทึกข่าวนี้'}
                 title={isBookmarked ? 'นำออกจากที่บันทึกไว้' : 'บันทึกไว้อ่านภายหลัง'}
-                className={`p-1 rounded transition-colors ${
+                className={`p-2 -m-1 rounded transition-colors ${
                   isBookmarked
                     ? 'text-editorial'
-                    : 'text-ink-muted/60 hover:text-ink-primary'
+                    : 'text-ink-muted hover:text-ink-primary'
                 }`}
               >
                 <Bookmark
@@ -341,14 +359,14 @@ export const NewsCard: React.FC<NewsCardProps> = ({
 
           {/* Authoritative Headline */}
           <h3
-            className={`thai-headline font-bold text-ink-primary group-hover:text-editorial transition-colors mb-2 ${COMPACT_HEADLINE_SCALE[fontScale]}`}
+            className={`thai-headline break-words font-bold text-ink-primary group-hover:text-editorial transition-colors mb-2 ${COMPACT_HEADLINE_SCALE[fontScale]}`}
           >
             <RichThaiText text={item.title_th} variant="headline" />
           </h3>
 
           {/* Executive TL;DR Preview */}
           <p
-            className={`thai-prose text-ink-secondary line-clamp-2 ${TEASER_SCALE[fontScale]}`}
+            className={`thai-prose break-words text-ink-secondary line-clamp-2 ${TEASER_SCALE[fontScale]}`}
           >
             {teaserText}
           </p>
@@ -359,14 +377,16 @@ export const NewsCard: React.FC<NewsCardProps> = ({
       <div className="px-5 py-3 border-t border-rule/80 flex items-center justify-between gap-3 text-[11px] text-ink-muted">
         <div className="flex items-center gap-1.5 min-w-0 truncate">
           {primarySource && (
-            <span className="font-medium text-ink-secondary truncate">
-              {primarySource.title}
-              {extraSourcesCount > 0 ? ` +${extraSourcesCount}` : ''}
-            </span>
+            <>
+              <span className="font-medium text-ink-secondary truncate">
+                {primarySource.title}
+                {extraSourcesCount > 0 ? ` +${extraSourcesCount}` : ''}
+              </span>
+              <span aria-hidden="true" className="text-rule-strong">
+                ·
+              </span>
+            </>
           )}
-          <span aria-hidden="true" className="text-rule-strong">
-            ·
-          </span>
           <span className="shrink-0">{formatThaiDate(item.published_at)}</span>
         </div>
 

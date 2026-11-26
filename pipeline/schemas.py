@@ -11,6 +11,7 @@ Ensures strict schema alignment across:
 
 from typing import Any, Dict, List, Literal, Optional
 import re
+from urllib.parse import urlparse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ==============================================================================
@@ -66,6 +67,29 @@ class SourceUrlItem(BaseModel):
         default=False,
         description="True if official company blog or ArXiv paper; False if press/media or Reddit thread",
     )
+
+    @field_validator("url")
+    @classmethod
+    def validate_http_url(cls, v: str) -> str:
+        cleaned = v.strip()
+        if any(ch in cleaned for ch in ("\r", "\n", "\x00")):
+            raise ValueError("URL contains control characters")
+        parsed = urlparse(cleaned)
+        if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+            raise ValueError("Source URL must be a valid http(s) URL")
+        return cleaned
+
+
+def _sanitize_optional_image_url(value: Any) -> Optional[str]:
+    if not value or not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if any(ch in cleaned for ch in ("\r", "\n", "\x00")):
+        return None
+    parsed = urlparse(cleaned)
+    if parsed.scheme.lower() != "https" or not parsed.hostname:
+        return None
+    return cleaned
 
 
 class KeyFactItem(BaseModel):
@@ -181,6 +205,11 @@ class Stage1ClusterItem(BaseModel):
     def sanitize_company_tags(cls, v: Any) -> List[str]:
         return _normalize_company_tags(v)
 
+    @field_validator("image_url", mode="before")
+    @classmethod
+    def sanitize_image_url(cls, v: Any) -> Optional[str]:
+        return _sanitize_optional_image_url(v)
+
 
 class Stage1BatchOutput(BaseModel):
     clusters: List[Stage1ClusterItem] = Field(
@@ -277,6 +306,11 @@ class Stage2NewsItem(BaseModel):
     @classmethod
     def sanitize_company_tags(cls, v: Any) -> List[str]:
         return _normalize_company_tags(v)
+
+    @field_validator("image_url", mode="before")
+    @classmethod
+    def sanitize_image_url(cls, v: Any) -> Optional[str]:
+        return _sanitize_optional_image_url(v)
 
     @model_validator(mode="after")
     def validate_status_and_category(self) -> "Stage2NewsItem":

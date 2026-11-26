@@ -18,6 +18,7 @@ from pipeline.ai_processor.batch_client import (
     BatchExecutionResult,
 )
 from pipeline.config import PROJECT_ROOT, PipelineConfig
+from pipeline.ingestion.http_safety import is_official_domain
 from pipeline.prompts import (
     PriorPublishedTopic,
     build_stage2_message_params,
@@ -124,33 +125,92 @@ def run_stage2_opus(
         for e in audit.errors:
             logger.warning("[Stage2-Audit] ERROR (applying deterministic code-gates): %s", e)
 
-    # Whitelists from Stage 1 for strict provenance code-gating
-    valid_image_urls: Set[str] = {c.image_url for c in stage1_clusters if c.image_url}
-    url_to_status: Dict[str, str] = {}
+    # Whitelists from Stage 1 for strict provenance & status-isolated code-gating
+    valid_images_by_status: Dict[str, Dict[str, Optional[str]]] = {
+        "verified": {},
+        "rumor": {},
+    }
+    url_to_statuses: Dict[str, Set[str]] = {}
     for c in stage1_clusters:
+        if c.image_url:
+            valid_images_by_status[c.status][c.image_url] = c.image_credit
         for src in c.source_urls:
-            url_to_status[src.url] = c.status
+            url_to_statuses.setdefault(src.url, set()).add(c.status)
+
+    # Protect already-published rows in the same (week_id, batch_type) from silent upsert overwrite
+    existing_same_bucket_slugs: Set[str] = {
+        str(row.get("cluster_slug") or "")
+        for row in (midweek_published_headlines or [])
+        if row.get("week_id") == week_id
+        and row.get("batch_type") == batch_type
+        and row.get("cluster_slug")
+    }
 
     final_items: List[Stage2NewsItem] = []
     seen_slugs: Set[str] = set()
+    kept_rumors = 0
+    max_rumors_per_run = 3
 
     for item in validated.items:
-        if item.cluster_slug in seen_slugs:
+        candidate_slug = item.cluster_slug
+        if candidate_slug in seen_slugs:
             continue
-        seen_slugs.add(item.cluster_slug)
 
-        # Keep only verbatim source URLs belonging to the same status
-        clean_sources = [
-            src
-            for src in item.source_urls
-            if src.url in url_to_status and url_to_status[src.url] == item.status
-        ]
+        # Never allow a new run (or prompt injection) to overwrite an already-published DB row
+        if candidate_slug in existing_same_bucket_slugs:
+            if item.status == "rumor":
+                logger.warning(
+                    "[Stage2-CodeGate] Dropping rumor reusing existing published slug '%s'.",
+                    candidate_slug,
+                )
+                continue
+            # Disambiguate follow-up verified updates safely so prior verified row stays intact
+            suffix_idx = 2
+            new_slug = f"{candidate_slug}-update"
+            while new_slug in existing_same_bucket_slugs or new_slug in seen_slugs:
+                new_slug = f"{candidate_slug}-update-{suffix_idx}"
+                suffix_idx += 1
+            logger.info(
+                "[Stage2-CodeGate] Disambiguated follow-up slug '%s' -> '%s' to protect existing row.",
+                candidate_slug,
+                new_slug,
+            )
+            candidate_slug = new_slug
+
+        # Enforce hard rumor cap in code (<= 3 per cycle)
+        if item.status == "rumor" and kept_rumors >= max_rumors_per_run:
+            logger.info(
+                "[Stage2-CodeGate] Skipping extra rumor '%s' (cap=%d reached).",
+                candidate_slug,
+                max_rumors_per_run,
+            )
+            continue
+
+        # Keep only verbatim source URLs belonging to the same status & re-enforce is_official deterministically
+        clean_sources = []
+        for src in item.source_urls:
+            if item.status not in url_to_statuses.get(src.url, set()):
+                continue
+            enforced_official = (
+                False if item.status == "rumor" else is_official_domain(src.url)
+            )
+            clean_sources.append(src.model_copy(update={"is_official": enforced_official}))
+
         if not clean_sources:
-            logger.warning("[Stage2-CodeGate] Dropping '%s' due to zero valid matching source_urls.", item.cluster_slug)
+            logger.warning("[Stage2-CodeGate] Dropping '%s' due to zero valid matching source_urls.", candidate_slug)
             continue
 
-        safe_image_url = item.image_url if item.image_url in valid_image_urls else None
-        safe_image_credit = item.image_credit if safe_image_url else None
+        # Sort official citations first
+        clean_sources.sort(key=lambda s: not s.is_official)
+
+        # Status-isolated image URL + Stage-1 whitelisted credit
+        status_image_map = valid_images_by_status.get(item.status, {})
+        safe_image_url = item.image_url if item.image_url in status_image_map else None
+        safe_image_credit = (
+            status_image_map.get(safe_image_url) or item.image_credit
+            if safe_image_url
+            else None
+        )
         enforced_category = None if item.status == "rumor" else item.category
 
         # Clean any accidental markdown tokens so UI plain-text rendering stays pristine
@@ -167,9 +227,14 @@ def run_stage2_opus(
             for kf in item.key_facts
         ]
 
+        seen_slugs.add(candidate_slug)
+        if item.status == "rumor":
+            kept_rumors += 1
+
         final_items.append(
             item.model_copy(
                 update={
+                    "cluster_slug": candidate_slug,
                     "category": enforced_category,
                     "image_url": safe_image_url,
                     "image_credit": safe_image_credit,
@@ -182,23 +247,53 @@ def run_stage2_opus(
             )
         )
 
-    # Triple-locked deterministic gate for superseded rumor graduation:
-    # Only accept slugs that actually exist as status='rumor' in prior_topics AND only when
-    # at least one verified item is emitted in this run.
-    known_prior_rumor_slugs: Set[str] = {
-        t.cluster_slug for t in prior_topics if t.status == "rumor" and t.cluster_slug
+    # Quadruple-locked deterministic gate for superseded rumor graduation:
+    # 1) Only when today's batch emits verified items
+    # 2) Only slugs belonging to known prior status='rumor' rows (mapped to exact row UUIDs)
+    # 3) Company tag overlap required when both sides have specific non-'Other' tags
+    # 4) Hard cap per run <= min(3, verified_count)
+    prior_rumors_by_slug: Dict[str, List[Dict[str, Any]]] = {}
+    for row in (midweek_published_headlines or []):
+        slug = str(row.get("cluster_slug") or "")
+        if row.get("status") == "rumor" and slug:
+            prior_rumors_by_slug.setdefault(slug, []).append(row)
+
+    verified_items_out = [i for i in final_items if i.status == "verified"]
+    verified_specific_tags: Set[str] = {
+        tag
+        for item in verified_items_out
+        for tag in item.company_tags
+        if tag != "Other"
     }
-    has_new_verified = any(i.status == "verified" for i in final_items)
+    max_deletions = min(3, len(verified_items_out))
     validated_superseded_rumors: List[str] = []
-    if has_new_verified:
+
+    if max_deletions > 0:
         for slug in validated.superseded_rumor_slugs:
-            if slug in known_prior_rumor_slugs:
-                validated_superseded_rumors.append(slug)
-            else:
+            if len(validated_superseded_rumors) >= max_deletions:
+                break
+            matched_rows = prior_rumors_by_slug.get(slug)
+            if not matched_rows:
                 logger.warning(
                     "[Stage2-CodeGate] Ignoring unknown/non-rumor superseded_rumor_slug '%s'.",
                     slug,
                 )
+                continue
+            for row in matched_rows:
+                rumor_tags = {t for t in (row.get("company_tags") or []) if t != "Other"}
+                if rumor_tags and verified_specific_tags and not (rumor_tags & verified_specific_tags):
+                    logger.warning(
+                        "[Stage2-CodeGate] Blocking rumor graduation '%s' due to company_tag mismatch (%s vs %s).",
+                        slug,
+                        rumor_tags,
+                        verified_specific_tags,
+                    )
+                    continue
+                target_ref = str(row.get("id") or slug)
+                if target_ref not in validated_superseded_rumors:
+                    validated_superseded_rumors.append(target_ref)
+                if len(validated_superseded_rumors) >= max_deletions:
+                    break
 
     logger.info(
         "[%s] Curated %d final Thai briefs (verified=%d, rumor=%d, superseded_rumors=%d, in=%d, out=%d, fallback=%s, audit_ok=%s).",

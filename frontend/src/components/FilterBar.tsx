@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, Search, X } from 'lucide-react';
+import { Calendar, ChevronDown, Search, X } from 'lucide-react';
 import {
   ALL_COMPANIES,
   CompanyTag,
@@ -97,14 +97,14 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         </div>
 
         {/* Period Dropdown: Day Selector (Daily) or Week Selector (Weekly) */}
-        <div className="relative sm:w-60 shrink-0">
+        <div className="relative sm:w-60 shrink-0 h-9">
           <Calendar className="w-3.5 h-3.5 text-ink-muted absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           {viewMode === 'daily' ? (
             <select
               value={selectedDay}
               onChange={(e) => onSelectDay(e.target.value)}
               aria-label="เลือกวันที่"
-              className="w-full h-9 pl-8 pr-3 text-xs font-semibold rounded-md border border-rule bg-surface text-ink-primary focus:outline-none focus:border-editorial transition-colors cursor-pointer"
+              className="appearance-none w-full h-9 py-0 pl-8 pr-8 text-xs leading-[34px] font-semibold rounded-md border border-rule bg-surface text-ink-primary focus:outline-none focus:border-editorial transition-colors cursor-pointer"
             >
               {availableDays.length === 0 ? (
                 <option value="">กำลังโหลดวันที่...</option>
@@ -121,7 +121,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               value={selectedWeek}
               onChange={(e) => onSelectWeek(e.target.value)}
               aria-label="เลือกสัปดาห์"
-              className="w-full h-9 pl-8 pr-3 text-xs font-semibold rounded-md border border-rule bg-surface text-ink-primary focus:outline-none focus:border-editorial transition-colors cursor-pointer"
+              className="appearance-none w-full h-9 py-0 pl-8 pr-8 text-xs leading-[34px] font-semibold rounded-md border border-rule bg-surface text-ink-primary focus:outline-none focus:border-editorial transition-colors cursor-pointer"
             >
               {availableWeeks.length === 0 ? (
                 <option value="">กำลังโหลดสัปดาห์...</option>
@@ -134,6 +134,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               )}
             </select>
           )}
+          <ChevronDown className="w-3.5 h-3.5 text-ink-muted absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
         </div>
 
         {/* Cycle Segmented Control (Weekly mode only) */}

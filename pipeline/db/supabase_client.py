@@ -42,7 +42,7 @@ class AinewsSupabaseClient:
         try:
             resp = (
                 self.client.table("news_items")
-                .select("cluster_slug, status, company_tags, title_th, tldr_th, source_urls, published_at")
+                .select("id, week_id, batch_type, cluster_slug, status, company_tags, title_th, tldr_th, source_urls, published_at")
                 .gte("published_at", cutoff_iso)
                 .order("published_at", desc=True)
                 .limit(limit)
@@ -55,6 +55,9 @@ class AinewsSupabaseClient:
             for row in rows:
                 topics.append(
                     {
+                        "id": row.get("id", ""),
+                        "week_id": row.get("week_id", ""),
+                        "batch_type": row.get("batch_type", ""),
                         "cluster_slug": row.get("cluster_slug", ""),
                         "status": row.get("status", "verified"),
                         "company_tags": row.get("company_tags") or [],
@@ -80,32 +83,41 @@ class AinewsSupabaseClient:
             logger.warning("Could not fetch recent published context: %s", exc)
             return [], set()
 
-    def delete_superseded_rumors(self, rumor_slugs: List[str]) -> int:
+    def delete_superseded_rumors(
+        self,
+        rumor_slugs: List[str],
+        rumor_ids: Optional[List[str]] = None,
+    ) -> int:
         """
         Safely deletes stale status='rumor' rows whose story has now been officially
-        confirmed by a new status='verified' brief. Double-locked to status='rumor' ONLY.
+        confirmed by a new status='verified' brief. Double-locked to status='rumor' ONLY
+        and scoped strictly to exact UUIDs when provided (never touching older weeks).
         """
+        clean_ids = [rid.strip() for rid in (rumor_ids or []) if rid and rid.strip()]
         clean_slugs = [s.strip() for s in rumor_slugs if s and s.strip()]
-        if not clean_slugs:
+        if not clean_ids and not clean_slugs:
             return 0
 
         try:
-            resp = (
-                self.client.table("news_items")
-                .delete()
-                .eq("status", "rumor")
-                .in_("cluster_slug", clean_slugs)
-                .execute()
-            )
+            query = self.client.table("news_items").delete().eq("status", "rumor")
+            if clean_ids:
+                query = query.in_("id", clean_ids)
+            else:
+                query = query.in_("cluster_slug", clean_slugs)
+            resp = query.execute()
             deleted = len(resp.data or [])
             logger.info(
                 "Removed %d superseded rumor item(s) now confirmed as verified: %s",
                 deleted,
-                clean_slugs,
+                clean_ids or clean_slugs,
             )
             return deleted
         except Exception as exc:
-            logger.warning("Failed removing superseded rumors %s: %s", clean_slugs, exc)
+            logger.warning(
+                "Failed removing superseded rumors %s: %s",
+                clean_ids or clean_slugs,
+                exc,
+            )
             return 0
 
     def fetch_midweek_headlines(self, week_id: str) -> List[Dict[str, Any]]:

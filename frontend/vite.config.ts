@@ -8,6 +8,29 @@ const PLACEHOLDER_MARKERS = [
   'your-supabase-secret',
 ];
 
+function isSafeSupabasePublicKey(raw: string): boolean {
+  const lower = raw.toLowerCase();
+  if (lower.startsWith('sb_secret_') || lower.includes('service_role')) {
+    return false;
+  }
+  // If key is a legacy JWT, decode its payload and strictly require role === 'anon'
+  const parts = raw.split('.');
+  if (parts.length === 3) {
+    try {
+      const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+      const payload = JSON.parse(Buffer.from(padded, 'base64').toString('utf-8')) as {
+        role?: string;
+      };
+      return payload.role === 'anon';
+    } catch {
+      return false;
+    }
+  }
+  // Modern Supabase publishable keys must start with sb_publishable_
+  return lower.startsWith('sb_publishable_');
+}
+
 function pickSafePublicEnv(
   sources: Array<Record<string, string>>,
   keys: string[],
@@ -19,7 +42,7 @@ function pickSafePublicEnv(
       if (!raw) continue;
       const lower = raw.toLowerCase();
       if (PLACEHOLDER_MARKERS.some((marker) => lower.includes(marker))) continue;
-      if (isKey && (lower.startsWith('sb_secret_') || lower.includes('service_role'))) {
+      if (isKey && !isSafeSupabasePublicKey(raw)) {
         continue;
       }
       return raw;

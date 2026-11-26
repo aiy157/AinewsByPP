@@ -13,8 +13,9 @@ export function stripRumorPrefix(title: string): string {
 
 // Subtle typographic weight emphasis ONLY for key quantitative figures & quoted names
 // inside long-form reading prose — zero noisy colored highlight pills.
+// Odd indices after `.split()` are guaranteed to be matched tokens (no stateful /g .test()).
 const PROSE_EMPHASIS_REGEX =
-  /("[^"]+"|\b\d+(?:[.,]\d+)*\s*(?:%|GW|MW|TB|GB|MB|K\s*Tokens|Tokens|B\b|พารามิเตอร์|เท่า|มิลลิวินาที|ระดับ|ฉบับ|แห่ง|เดือน))/g;
+  /((?<!\d)"[^"\n]{2,60}"|(?<![\w-/])\d+(?:[.,]\d+)*(?:[–-]\d+(?:[.,]\d+)*)?\s*(?:%(?![0-9A-Fa-f]{2})|(?:GW|MW|TB|GB|MB|K\s*Tokens|Tokens|B)(?![\w-])|(?:พารามิเตอร์|เท่า|มิลลิวินาที|ระดับ|ฉบับ|แห่ง|เดือน)(?![ก-๛])))/g;
 
 export const RichThaiText: React.FC<RichThaiTextProps> = ({
   text,
@@ -30,8 +31,7 @@ export const RichThaiText: React.FC<RichThaiTextProps> = ({
     <>
       {parts.map((part, idx) => {
         if (!part) return null;
-        if (PROSE_EMPHASIS_REGEX.test(part)) {
-          PROSE_EMPHASIS_REGEX.lastIndex = 0;
+        if (idx % 2 === 1) {
           return (
             <strong key={idx} className="font-semibold text-ink-primary">
               {part}

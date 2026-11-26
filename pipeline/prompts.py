@@ -538,11 +538,17 @@ def escape_xml_closing_tag(payload: str, tag_name: str) -> str:
 
 
 def _dump_compact_json(items: Sequence[Union[BaseModel, Dict[str, Any]]]) -> str:
+    """
+    Serializes untrusted records to compact JSON while escaping `<` and `>` as
+    standard JSON unicode escapes (`\\u003c`, `\\u003e`) so external article text
+    can NEVER inject or break out of ANY XML sandbox boundary tag.
+    """
     serialized = [
         item.model_dump(mode="json") if isinstance(item, BaseModel) else item
         for item in items
     ]
-    return json.dumps(serialized, ensure_ascii=False, separators=(",", ":"))
+    dumped = json.dumps(serialized, ensure_ascii=False, separators=(",", ":"))
+    return dumped.replace("<", "\\u003c").replace(">", "\\u003e")
 
 
 def build_stage1_system_blocks(enable_cache: bool = True) -> List[Dict[str, Any]]:

@@ -143,7 +143,7 @@ def _fetch_subreddit_rumors(
 
             title = _clean_text(str(post.get("title") or ""), max_chars=300)
             permalink = str(post.get("permalink") or "").strip()
-            if not title or not permalink:
+            if not title or not permalink or not permalink.startswith("/r/"):
                 continue
 
             reddit_url = f"https://www.reddit.com{permalink}"

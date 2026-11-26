@@ -9,61 +9,63 @@
      Dark Mode  = Restful Graphite Print (warm ivory ink, zero neon halation)
      ======================================================================== */
   :root {
-    --bg-canvas: #f7f6f2;
-    --bg-surface: #ffffff;
-    --bg-subtle: #efede7;
-    --ink-primary: #141413;
-    --ink-secondary: #4a4742;
-    --ink-muted: #78736a;
-    --border-rule: #e4e1d8;
-    --border-rule-strong: #c8c3b7;
+    color-scheme: light;
+    --bg-canvas: 247 246 242;
+    --bg-surface: 255 255 255;
+    --bg-subtle: 239 237 231;
+    --ink-primary: 20 20 19;
+    --ink-secondary: 74 71 66;
+    --ink-muted: 95 90 82;
+    --border-rule: 228 225 216;
+    --border-rule-strong: 200 195 183;
 
     /* Multi-dimensional restrained accents */
-    --accent-editorial: #1d4268;
-    --accent-editorial-soft: rgba(29, 66, 104, 0.08);
-    --accent-verified: #166534;
+    --accent-editorial: 29 66 104;
+    --accent-editorial-soft: rgba(29, 66, 104, 0.09);
+    --accent-verified: 22 101 52;
     --accent-verified-soft: rgba(22, 101, 52, 0.09);
 
     /* Dedicated Rumor Radar palette (warm ochre/terracotta — distinct from verified) */
-    --accent-rumor: #9a3412;
-    --accent-rumor-soft: rgba(180, 83, 9, 0.11);
-    --bg-rumor-surface: #fdf7ef;
-    --border-rumor: #d99b52;
+    --accent-rumor: 154 52 18;
+    --accent-rumor-soft: rgba(180, 83, 9, 0.12);
+    --bg-rumor-surface: 253 247 239;
+    --border-rumor: 217 155 82;
   }
 
   .dark {
-    --bg-canvas: #0f1115;
-    --bg-surface: #161920;
-    --bg-subtle: #1e222c;
-    --ink-primary: #f2f0eb;
-    --ink-secondary: #b5b8c2;
-    --ink-muted: #7f8491;
-    --border-rule: #252a34;
-    --border-rule-strong: #373d4b;
+    color-scheme: dark;
+    --bg-canvas: 15 17 21;
+    --bg-surface: 22 25 32;
+    --bg-subtle: 30 34 44;
+    --ink-primary: 242 240 235;
+    --ink-secondary: 181 184 194;
+    --ink-muted: 151 156 168;
+    --border-rule: 37 42 52;
+    --border-rule-strong: 55 61 75;
 
-    --accent-editorial: #7cb3e8;
-    --accent-editorial-soft: rgba(124, 179, 232, 0.12);
-    --accent-verified: #4ade80;
-    --accent-verified-soft: rgba(74, 222, 128, 0.11);
+    --accent-editorial: 124 179 232;
+    --accent-editorial-soft: rgba(124, 179, 232, 0.14);
+    --accent-verified: 74 222 128;
+    --accent-verified-soft: rgba(74, 222, 128, 0.12);
 
-    --accent-rumor: #f59e0b;
-    --accent-rumor-soft: rgba(245, 158, 11, 0.14);
-    --bg-rumor-surface: #1b1610;
-    --border-rumor: #8a5a19;
+    --accent-rumor: 245 158 11;
+    --accent-rumor-soft: rgba(245, 158, 11, 0.15);
+    --bg-rumor-surface: 27 22 16;
+    --border-rumor: 138 90 25;
   }
 
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
-    background-color: var(--bg-canvas);
-    color: var(--ink-primary);
+    background-color: rgb(var(--bg-canvas));
+    color: rgb(var(--ink-primary));
   }
 
   body {
     font-family: "IBM Plex Sans Thai", "Sarabun", system-ui, -apple-system, sans-serif;
-    background-color: var(--bg-canvas);
-    color: var(--ink-primary);
+    background-color: rgb(var(--bg-canvas));
+    color: rgb(var(--ink-primary));
     line-height: 1.75;
     transition: background-color 180ms ease, color 180ms ease;
   }
@@ -94,7 +96,7 @@
   background: transparent;
 }
 .editorial-scroll::-webkit-scrollbar-thumb {
-  background-color: var(--border-rule-strong);
+  background-color: rgb(var(--border-rule-strong));
   border-radius: 9999px;
 }
 
