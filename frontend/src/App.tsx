@@ -4,9 +4,12 @@ import {
   ALL_COMPANIES,
   CompanyTag,
   CycleFilter,
+  DayOption,
   NewsItem,
   PageTabId,
+  SortOrder,
   VERIFIED_CATEGORIES,
+  ViewMode,
 } from './types/news';
 import { fetchAllNewsItems } from './lib/supabase';
 import { Header } from './components/Header';
@@ -14,6 +17,39 @@ import { FilterBar } from './components/FilterBar';
 import { TabNavigation } from './components/TabNavigation';
 import { FontScale, NewsCard } from './components/NewsCard';
 import { ReaderModal } from './components/ReaderModal';
+
+function getThaiDayKey(isoString?: string): string {
+  if (!isoString) return '';
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Bangkok',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(isoString));
+  } catch {
+    return isoString.slice(0, 10);
+  }
+}
+
+function getItemEditionDay(item: NewsItem): string {
+  return getThaiDayKey(item.created_at ?? item.published_at);
+}
+
+function formatThaiDayKey(dayKey: string): string {
+  if (!dayKey) return '—';
+  try {
+    const d = new Date(`${dayKey}T12:00:00+07:00`);
+    return new Intl.DateTimeFormat('th-TH', {
+      timeZone: 'Asia/Bangkok',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    }).format(d);
+  } catch {
+    return dayKey;
+  }
+}
 
 export const App: React.FC = () => {
   // 1. Theme State: Archival Paper Light default, persists user preference
@@ -71,9 +107,20 @@ export const App: React.FC = () => {
   const [statusNotice, setStatusNotice] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // 4. Filter & Tab States
+  // 4. Filter & Tab States (2 Systems: Daily default / Weekly)
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    const saved = localStorage.getItem('ainews_view_mode') as ViewMode | null;
+    return saved === 'weekly' || saved === 'daily' ? saved : 'daily';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('ainews_view_mode', viewMode);
+  }, [viewMode]);
+
+  const [selectedDay, setSelectedDay] = useState<string>('');
   const [selectedWeek, setSelectedWeek] = useState<string>('');
   const [selectedCycle, setSelectedCycle] = useState<CycleFilter>('all');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('latest');
   const [selectedCompany, setSelectedCompany] = useState<CompanyTag | 'ALL'>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [activeTab, setActiveTab] = useState<PageTabId>('overview');
@@ -84,6 +131,15 @@ export const App: React.FC = () => {
     setAllNews(result.items);
     setDataSource(result.source);
     setStatusNotice(result.errorMessage);
+
+    const days = Array.from(
+      new Set(result.items.map((i) => getItemEditionDay(i)).filter(Boolean))
+    )
+      .sort()
+      .reverse();
+    if (days.length > 0) {
+      setSelectedDay((prev) => (prev && days.includes(prev) ? prev : days[0]));
+    }
 
     const weeks = Array.from(new Set(result.items.map((i) => i.week_id)))
       .sort()
@@ -98,19 +154,39 @@ export const App: React.FC = () => {
     void loadData();
   }, []);
 
+  const availableDays = useMemo<DayOption[]>(() => {
+    const countMap = new Map<string, number>();
+    for (const item of allNews) {
+      const key = getItemEditionDay(item);
+      if (!key) continue;
+      countMap.set(key, (countMap.get(key) ?? 0) + 1);
+    }
+    return Array.from(countMap.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, count]) => ({
+        key,
+        label: formatThaiDayKey(key),
+        count,
+      }));
+  }, [allNews]);
+
   const availableWeeks = useMemo(() => {
     return Array.from(new Set(allNews.map((item) => item.week_id)))
       .sort()
       .reverse();
   }, [allNews]);
 
-  // Filter by week, cycle, bookmark, and keyword search
+  // Filter by viewMode (Daily or Weekly), cycle, bookmark, and keyword search
   const itemsInPeriodAndSearch = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
 
     return allNews.filter((item) => {
-      if (item.week_id !== selectedWeek) return false;
-      if (selectedCycle !== 'all' && item.batch_type !== selectedCycle) return false;
+      if (viewMode === 'daily') {
+        if (selectedDay && getItemEditionDay(item) !== selectedDay) return false;
+      } else {
+        if (selectedWeek && item.week_id !== selectedWeek) return false;
+        if (selectedCycle !== 'all' && item.batch_type !== selectedCycle) return false;
+      }
       if (showOnlyBookmarked && !bookmarkedIds.includes(item.id)) return false;
 
       if (q.length > 0) {
@@ -138,6 +214,8 @@ export const App: React.FC = () => {
     });
   }, [
     allNews,
+    viewMode,
+    selectedDay,
     selectedWeek,
     selectedCycle,
     searchQuery,
@@ -158,7 +236,25 @@ export const App: React.FC = () => {
     return counts;
   }, [itemsInPeriodAndSearch]);
 
-  // Apply company filter + sort strictly by importance_score DESC
+  // Identify the latest daily fetch edition within the active week (for "ใหม่" badge)
+  const { latestEditionDay, hasMultipleEditionDays } = useMemo(() => {
+    const days = Array.from(
+      new Set(itemsInPeriodAndSearch.map((item) => getItemEditionDay(item)).filter(Boolean))
+    )
+      .sort()
+      .reverse();
+    return {
+      latestEditionDay: days[0] ?? '',
+      hasMultipleEditionDays: days.length > 1,
+    };
+  }, [itemsInPeriodAndSearch]);
+
+  const isItemInLatestBatch = (item: NewsItem): boolean =>
+    viewMode === 'weekly' &&
+    hasMultipleEditionDays &&
+    getItemEditionDay(item) === latestEditionDay;
+
+  // Apply company filter + sort
   const filteredAndSortedItems = useMemo(() => {
     const matched = itemsInPeriodAndSearch.filter((item) => {
       if (selectedCompany === 'ALL') return true;
@@ -166,6 +262,27 @@ export const App: React.FC = () => {
     });
 
     return [...matched].sort((a, b) => {
+      if (sortOrder === 'latest') {
+        if (viewMode === 'weekly') {
+          const dayA = getItemEditionDay(a);
+          const dayB = getItemEditionDay(b);
+          if (dayB !== dayA) {
+            return dayB.localeCompare(dayA);
+          }
+          if (b.importance_score !== a.importance_score) {
+            return b.importance_score - a.importance_score;
+          }
+          return (
+            new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
+          );
+        }
+        // Daily mode + 'latest': newest published timestamp first, importance as tie-breaker
+        const timeDiff =
+          new Date(b.published_at).getTime() - new Date(a.published_at).getTime();
+        if (timeDiff !== 0) return timeDiff;
+        return b.importance_score - a.importance_score;
+      }
+
       if (b.importance_score !== a.importance_score) {
         return b.importance_score - a.importance_score;
       }
@@ -173,7 +290,7 @@ export const App: React.FC = () => {
         new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
       );
     });
-  }, [itemsInPeriodAndSearch, selectedCompany]);
+  }, [itemsInPeriodAndSearch, selectedCompany, sortOrder, viewMode]);
 
   const verifiedItems = useMemo(
     () => filteredAndSortedItems.filter((i) => i.status === 'verified'),
@@ -235,6 +352,11 @@ export const App: React.FC = () => {
 
   const leadVerifiedStory = verifiedItems[0] ?? null;
 
+  const editionBadgeLabel =
+    viewMode === 'daily'
+      ? `DAILY · ${selectedDay ? formatThaiDayKey(selectedDay) : '—'}`
+      : `ISSUE ${selectedWeek || '—'}`;
+
   return (
     <div className="min-h-screen flex flex-col bg-canvas text-ink-primary">
       {/* Masthead */}
@@ -244,7 +366,7 @@ export const App: React.FC = () => {
         dataSource={dataSource}
         totalVerified={verifiedItems.length}
         totalRumors={rumorItems.length}
-        selectedWeek={selectedWeek}
+        editionBadgeLabel={editionBadgeLabel}
         fontScale={fontScale}
         onChangeFontScale={setFontScale}
         bookmarkedCount={bookmarkedIds.length}
@@ -278,13 +400,20 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        {/* Streamlined Utility Filter Bar */}
+        {/* Streamlined Utility Filter Bar (Daily / Weekly 2-System Switcher) */}
         <FilterBar
+          viewMode={viewMode}
+          onSelectViewMode={setViewMode}
+          availableDays={availableDays}
+          selectedDay={selectedDay}
+          onSelectDay={setSelectedDay}
           availableWeeks={availableWeeks}
           selectedWeek={selectedWeek}
           onSelectWeek={setSelectedWeek}
           selectedCycle={selectedCycle}
           onSelectCycle={setSelectedCycle}
+          sortOrder={sortOrder}
+          onSelectSortOrder={setSortOrder}
           selectedCompany={selectedCompany}
           onSelectCompany={setSelectedCompany}
           searchQuery={searchQuery}
@@ -318,10 +447,18 @@ export const App: React.FC = () => {
                     <div className="lg:col-span-8 xl:col-span-9 space-y-10">
                       {/* Lead Feature Story */}
                       {leadVerifiedStory && (
-                        <section aria-label="ข่าวเด่นประจำสัปดาห์">
+                        <section
+                          aria-label={
+                            viewMode === 'daily'
+                              ? 'ข่าวเด่นประจำวัน'
+                              : 'ข่าวเด่นประจำสัปดาห์'
+                          }
+                        >
                           <div className="flex items-center justify-between pb-2 mb-4 border-b border-rule-strong">
                             <span className="text-[11px] font-bold uppercase tracking-widest text-editorial">
-                              Lead Briefing · ข่าวเด่นประจำสัปดาห์
+                              {viewMode === 'daily'
+                                ? 'Lead Briefing · ข่าวเด่นประจำวัน'
+                                : 'Lead Briefing · ข่าวเด่นประจำสัปดาห์'}
                             </span>
                             <span className="text-[11px] text-ink-muted">
                               ยืนยันจากแหล่งข่าวทางการ
@@ -330,6 +467,7 @@ export const App: React.FC = () => {
                           <NewsCard
                             item={leadVerifiedStory}
                             featured
+                            isLatestBatch={isItemInLatestBatch(leadVerifiedStory)}
                             isBookmarked={bookmarkedIds.includes(
                               leadVerifiedStory.id
                             )}
@@ -375,6 +513,7 @@ export const App: React.FC = () => {
                                 <NewsCard
                                   key={item.id}
                                   item={item}
+                                  isLatestBatch={isItemInLatestBatch(item)}
                                   isBookmarked={bookmarkedIds.includes(item.id)}
                                   onToggleBookmark={handleToggleBookmark}
                                   onOpenReader={setReaderItem}
@@ -423,6 +562,7 @@ export const App: React.FC = () => {
                             <NewsCard
                               key={item.id}
                               item={item}
+                              isLatestBatch={isItemInLatestBatch(item)}
                               isBookmarked={bookmarkedIds.includes(item.id)}
                               onToggleBookmark={handleToggleBookmark}
                               onOpenReader={setReaderItem}
@@ -471,6 +611,7 @@ export const App: React.FC = () => {
                       <NewsCard
                         key={item.id}
                         item={item}
+                        isLatestBatch={isItemInLatestBatch(item)}
                         isBookmarked={bookmarkedIds.includes(item.id)}
                         onToggleBookmark={handleToggleBookmark}
                         onOpenReader={setReaderItem}
@@ -519,6 +660,7 @@ export const App: React.FC = () => {
                       <NewsCard
                         key={item.id}
                         item={item}
+                        isLatestBatch={isItemInLatestBatch(item)}
                         isBookmarked={bookmarkedIds.includes(item.id)}
                         onToggleBookmark={handleToggleBookmark}
                         onOpenReader={setReaderItem}

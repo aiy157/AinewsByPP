@@ -65,8 +65,9 @@ export async function fetchAllNewsItems(forceMock = false): Promise<FetchNewsRes
       .from('news_items')
       .select('*')
       .order('week_id', { ascending: false })
-      .order('importance_score', { ascending: false })
-      .order('published_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .order('published_at', { ascending: false })
+      .order('importance_score', { ascending: false });
 
     if (error) {
       throw new Error(error.message);

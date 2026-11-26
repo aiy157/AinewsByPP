@@ -1,6 +1,14 @@
 export type BatchType = 'midweek' | 'weekend';
 export type CycleFilter = 'all' | 'midweek' | 'weekend';
+export type ViewMode = 'daily' | 'weekly';
+export type SortOrder = 'latest' | 'importance';
 export type NewsStatus = 'verified' | 'rumor';
+
+export interface DayOption {
+  key: string;
+  label: string;
+  count: number;
+}
 
 export type VerifiedCategory =
   | 'models_updates'
@@ -55,6 +63,7 @@ export interface NewsItem {
   cluster_slug: string;
   published_at: string;
   created_at?: string;
+  updated_at?: string;
 }
 
 export const ALL_COMPANIES: CompanyTag[] = [

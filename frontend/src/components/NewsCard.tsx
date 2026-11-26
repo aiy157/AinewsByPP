@@ -17,6 +17,7 @@ export type FontScale = 'normal' | 'large' | 'xlarge';
 interface NewsCardProps {
   item: NewsItem;
   featured?: boolean;
+  isLatestBatch?: boolean;
   isBookmarked: boolean;
   onToggleBookmark: (id: string) => void;
   onOpenReader: (item: NewsItem) => void;
@@ -65,6 +66,7 @@ export function formatThaiDate(isoString: string): string {
 export const NewsCard: React.FC<NewsCardProps> = ({
   item,
   featured = false,
+  isLatestBatch = false,
   isBookmarked,
   onToggleBookmark,
   onOpenReader,
@@ -123,6 +125,11 @@ export const NewsCard: React.FC<NewsCardProps> = ({
             <div>
               <div className="flex items-start justify-between gap-2 mb-3">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] tracking-wide">
+                  {isLatestBatch && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider bg-editorial/12 text-editorial">
+                      ใหม่
+                    </span>
+                  )}
                   <span className="font-bold text-editorial">
                     {categoryLabel}
                   </span>
@@ -273,6 +280,17 @@ export const NewsCard: React.FC<NewsCardProps> = ({
           {/* Top Meta Line */}
           <div className="flex items-start justify-between gap-2 mb-2.5">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] tracking-wide min-w-0">
+              {isLatestBatch && (
+                <span
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider ${
+                    isRumor
+                      ? 'bg-rumor/15 text-rumor'
+                      : 'bg-editorial/12 text-editorial'
+                  }`}
+                >
+                  ใหม่
+                </span>
+              )}
               {isRumor ? (
                 <span className="inline-flex items-center gap-1 font-bold uppercase text-rumor">
                   <AlertTriangle className="w-3 h-3 shrink-0" />

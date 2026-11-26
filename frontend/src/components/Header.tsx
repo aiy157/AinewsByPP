@@ -8,7 +8,7 @@ interface HeaderProps {
   dataSource: 'supabase' | 'mock';
   totalVerified: number;
   totalRumors: number;
-  selectedWeek: string;
+  editionBadgeLabel: string;
   fontScale: FontScale;
   onChangeFontScale: (scale: FontScale) => void;
   bookmarkedCount: number;
@@ -22,7 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   dataSource,
   totalVerified,
   totalRumors,
-  selectedWeek,
+  editionBadgeLabel,
   fontScale,
   onChangeFontScale,
   bookmarkedCount,
@@ -36,7 +36,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-8 flex items-center justify-between text-[11px] text-ink-muted tracking-wide">
           <div className="flex items-center gap-3 overflow-hidden whitespace-nowrap">
             <span className="font-semibold text-ink-secondary uppercase tracking-widest">
-              ISSUE {selectedWeek || '—'}
+              {editionBadgeLabel}
             </span>
             <span aria-hidden="true" className="text-rule-strong">
               |
