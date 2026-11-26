@@ -67,14 +67,23 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Main Publication Masthead */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
-        {/* Wordmark */}
-        <div className="flex items-baseline gap-3 min-w-0">
-          <h1 className="font-masthead text-2xl sm:text-[28px] font-bold tracking-tight text-ink-primary leading-none select-none">
-            AINEWS
-          </h1>
-          <span className="hidden md:inline text-xs text-ink-muted border-l border-rule-strong pl-3 truncate">
-            วารสารวิเคราะห์ข่าววงการ AI ภาษาไทย
-          </span>
+        {/* Brand Mark & Wordmark */}
+        <div className="flex items-center gap-3 min-w-0">
+          <img
+            src="/ainews-logo.jpg"
+            alt="AINEWS Logo"
+            width={34}
+            height={34}
+            className="w-8 h-8 sm:w-[34px] sm:h-[34px] rounded-md object-cover border border-rule shadow-sm shrink-0 select-none"
+          />
+          <div className="flex items-baseline gap-3 min-w-0">
+            <h1 className="font-masthead text-2xl sm:text-[28px] font-bold tracking-tight text-ink-primary leading-none select-none">
+              AINEWS
+            </h1>
+            <span className="hidden md:inline text-xs text-ink-muted border-l border-rule-strong pl-3 truncate">
+              วารสารวิเคราะห์ข่าววงการ AI ภาษาไทย
+            </span>
+          </div>
         </div>
 
         {/* Quiet Fixed-Format Utility Controls */}

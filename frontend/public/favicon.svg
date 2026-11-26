@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <rect width="64" height="64" rx="12" fill="#1D4268"/>
+  <!-- Architectural Editorial A + integrated vertical I column -->
+  <path d="M27.5 13H35.2L49.5 50H53V52H37.2V50H40.8L30.2 21.8V50H32.2V52H26.4V50H27.8V21.5L18.2 49.8H22.2V52H11V50H14.5L28.5 15.8L27.5 13Z" fill="#F7F6F2"/>
+  <rect x="20.6" y="36.2" width="7.8" height="2.2" fill="#F7F6F2"/>
+  <!-- Amber-Gold Signal Dot -->
+  <circle cx="33.8" cy="37.4" r="3.2" fill="#D99B52"/>
+</svg>
