@@ -9,8 +9,8 @@ interface TabNavigationProps {
   loading?: boolean;
 }
 
-const VERIFIED_TABS: Array<{ id: PageTabId; label: string }> = [
-  { id: 'overview', label: 'หน้าแรกทั้งหมด' },
+const VERIFIED_TABS: Array<{ id: PageTabId; label: string; title?: string }> = [
+  { id: 'overview', label: 'รวมทุกหมวด', title: 'รวมข่าวทุกหมวดหมู่ทั้งหมดในช่วงที่เลือก' },
   { id: 'models_updates', label: 'โมเดล & ระบบ' },
   { id: 'benchmarks_testing', label: 'ผลทดสอบ & วิจัย' },
   { id: 'partnerships_deals', label: 'ดีล & การลงทุน' },
@@ -61,6 +61,7 @@ export const TabNavigation: React.FC<TabNavigationProps> = ({
               <button
                 key={tab.id}
                 type="button"
+                title={tab.title}
                 aria-current={isActive ? 'page' : undefined}
                 onClick={() => onSelectTab(tab.id)}
                 className={`relative h-12 px-2.5 sm:px-3.5 inline-flex items-center gap-2 text-sm whitespace-nowrap transition-colors ${

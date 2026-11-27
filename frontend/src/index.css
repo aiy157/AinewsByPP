@@ -88,6 +88,13 @@
   letter-spacing: 0.004em;
 }
 
+/* Guarantee visible ellipsis whenever line-clamp is active on Thai prose */
+.line-clamp-2,
+.line-clamp-3,
+.line-clamp-4 {
+  text-overflow: ellipsis;
+}
+
 /* Custom subtle scrollbars for reader modal */
 .editorial-scroll::-webkit-scrollbar {
   width: 6px;

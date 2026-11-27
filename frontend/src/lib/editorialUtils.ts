@@ -131,6 +131,7 @@ export function formatWeekLabelCE(weekId?: string): string {
 
 export type TrustTier =
   | 'official'
+  | 'preprint'
   | 'multi_press'
   | 'press'
   | 'press_unconfirmed'
@@ -145,7 +146,26 @@ export interface TrustBadgeInfo {
 
 const PRESS_RUMOR_TITLE_RE = /^\s*\[(?:ลือ|ข่าวลือ|rumor|leak)\]/i;
 const ANONYMOUS_RUMOR_BODY_RE =
-  /(?:อ้างแหล่งข่าว(?:นิรนาม|ไม่เปิดเผยชื่อ|วงใน)|ยังไม่(?:มี|ได้รับ)คำยืนยัน(?:อย่างเป็นทางการ|ทางการ)|ข่าวลือ)/u;
+  /(?:แหล่งข่าว(?:นิรนาม|ไม่เปิดเผยชื่อ|วงใน)|ยังไม่(?:มี|ได้รับ)คำยืนยัน(?:อย่างเป็นทางการ|ทางการ)|ข่าวลือ)/u;
+
+export function isPreprintSource(src: SourceUrlItem): boolean {
+  const titleLower = (src.title ?? '').toLowerCase();
+  if (titleLower.includes('arxiv') || titleLower.includes('preprint')) {
+    return true;
+  }
+  try {
+    const host = new URL(src.url).hostname.toLowerCase().replace(/^www\./, '');
+    return (
+      host === 'arxiv.org' ||
+      host.endsWith('.arxiv.org') ||
+      host === 'biorxiv.org' ||
+      host === 'medrxiv.org' ||
+      host === 'openreview.net'
+    );
+  } catch {
+    return false;
+  }
+}
 
 export function getNewsTrustInfo(item: NewsItem): TrustBadgeInfo {
   if (item.status === 'rumor') {
@@ -157,13 +177,26 @@ export function getNewsTrustInfo(item: NewsItem): TrustBadgeInfo {
     };
   }
 
-  const hasOfficial = item.source_urls.some((s) => s.is_official);
-  if (hasOfficial) {
+  const hasCompanyOfficial = item.source_urls.some(
+    (s) => s.is_official && !isPreprintSource(s)
+  );
+  if (hasCompanyOfficial) {
     return {
       tier: 'official',
       shortLabel: 'ยืนยันทางการ',
       fullLabel: 'ยืนยันจากแหล่งข่าวทางการ',
-      tooltip: 'อ้างอิงโดยตรงจากประกาศทางการของบริษัทหรือเอกสารวิจัยต้นฉบับ',
+      tooltip: 'อ้างอิงโดยตรงจากประกาศทางการของบริษัทหรือหน่วยงานที่เกี่ยวข้อง',
+    };
+  }
+
+  const hasPreprint = item.source_urls.some((s) => isPreprintSource(s));
+  if (hasPreprint) {
+    return {
+      tier: 'preprint',
+      shortLabel: 'พรีปรินต์ ArXiv',
+      fullLabel: 'เอกสารวิจัยต้นฉบับ (ArXiv พรีปรินต์)',
+      tooltip:
+        'งานวิจัยต้นฉบับบน ArXiv (พรีปรินต์ — เผยแพร่โดยผู้วิจัยโดยตรง อาจยังไม่ผ่านการตรวจสอบโดยผู้เชี่ยวชาญ)',
     };
   }
 
@@ -258,16 +291,105 @@ export function matchesSearchTokens(item: NewsItem, tokens: string[]): boolean {
 }
 
 // ============================================================================
-// Boilerplate Section Filter (for legacy DB rows before prompt v2.3)
+// Boilerplate Section Filter & Legacy Heading Normalizer (pre-v2.3 DB rows)
 // ============================================================================
 
 const EMPTY_TEMPLATE_FILLER_RE =
-  /^(?:เรื่องนี้|ข่าวนี้|กรณีนี้|ประเด็นนี้)?(?:ไม่ใช่การเปิดตัว(?:สินค้า|ผลิตภัณฑ์|โมเดล)|ไม่มีการเปิดตัวสินค้า|ไม่เกี่ยวข้องกับการใช้งานผลิตภัณฑ์)[^。\n]{0,140}(?:ไม่มีช่องทางเข้าถึง|ไม่มีไลเซนส์|ไม่ระบุช่องทาง|ไม่มีเงื่อนไขการใช้งาน)/u;
+  /(?:เรื่องนี้|ข่าวนี้|กรณีนี้|ประเด็นนี้|รายงานนี้)?[^。\n]{0,60}(?:ไม่ใช่การเปิดตัว(?:สินค้า|ผลิตภัณฑ์|โมเดล)|ไม่มีการเปิดตัวสินค้า|ไม่เกี่ยวข้องกับการใช้งานผลิตภัณฑ์)[^。\n]{0,160}(?:ไม่มีช่องทางเข้าถึง|ไม่มีไลเซนส์|ไม่ระบุช่องทาง|ไม่มีเงื่อนไขการใช้งาน|ไม่มีรายละเอียดสเปก|ไม่มีสเปกทางเทคนิค)/u;
+
+const LEADING_NA_CLAUSE_RE =
+  /^(?:(?:เนื่องจาก|แม้ว่า)?(?:เรื่องนี้|ข่าวนี้|กรณีนี้|ประเด็นนี้|รายงานนี้)[^。\n]{0,140}?(?:ไม่ใช่การเปิดตัว(?:สินค้า|ผลิตภัณฑ์|โมเดล)|ไม่มีสเปกทางเทคนิคโดยตรง)[^。\n]{0,90}?(?:แต่|อย่างไรก็ตาม|จึง|ทว่า|โดย))(?:\s*)/u;
+
+const INLINE_NOT_PRODUCT_DISCLAIMER_RE =
+  /\s*(?:โดย)?ไม่ใช่การเปิดตัว(?:สินค้า|ผลิตภัณฑ์|โมเดล)(?:ใหม่)?(?:\s*(?:จึง|เลย)?ไม่(?:มี|ระบุ)(?:สเปก|ข้อมูลสเปก|รายละเอียดสเปก|ช่องทางเข้าถึง|ไลเซนส์|เงื่อนไขการใช้งาน)[^。\n]{0,60})?/gu;
 
 export function isEmptyTemplateFillerBody(sectionBody: string): boolean {
   const trimmed = sectionBody.trim();
-  if (trimmed.length > 260) return false;
+  if (trimmed.length > 340) return false;
   return EMPTY_TEMPLATE_FILLER_RE.test(trimmed);
+}
+
+export function cleanLegacySectionBody(sectionBody: string): string {
+  const trimmed = sectionBody.trim();
+  let cleaned = trimmed.replace(LEADING_NA_CLAUSE_RE, '').trim();
+  cleaned = cleaned
+    .replace(INLINE_NOT_PRODUCT_DISCLAIMER_RE, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  // Only apply if substantial content remains after removing the robotic disclaimer
+  return cleaned.length >= 60 ? cleaned : trimmed;
+}
+
+const LEGACY_HEADING_BY_CATEGORY: Record<string, Record<string, string>> = {
+  policy_rules: {
+    'ที่มาและบริบท': 'ที่มาและบริบทนโยบาย',
+    'เจาะลึกสเปกและกลไกเทคนิค': 'สาระสำคัญและขอบเขตการบังคับใช้',
+    'ตัวเลขและผลเปรียบเทียบ': 'ไทม์ไลน์ กลุ่มเป้าหมาย และตัวเลขสำคัญ',
+    'การเข้าถึงและเงื่อนไขการใช้งาน': 'ท่าทีผู้เกี่ยวข้องและช่องทางปฏิบัติตาม',
+    'ผลกระทบและข้อสังเกตที่ควรรู้': 'ผลกระทบต่ออุตสาหกรรมและข้อสังเกตที่ควรรู้',
+  },
+  partnerships_deals: {
+    'ที่มาและบริบท': 'ที่มาและบริบทดีล',
+    'เจาะลึกสเปกและกลไกเทคนิค': 'รายละเอียดข้อตกลงและขอบเขต',
+    'ตัวเลขและผลเปรียบเทียบ': 'มูลค่า ตัวเลข และไทม์ไลน์',
+    'การเข้าถึงและเงื่อนไขการใช้งาน': 'โครงสร้างการดำเนินงานและคู่สัญญา',
+    'ผลกระทบและข้อสังเกตที่ควรรู้': 'ผลกระทบต่อตลาดและข้อสังเกตที่ควรรู้',
+  },
+  benchmarks_testing: {
+    'ที่มาและบริบท': 'ที่มาและโจทย์วิจัย',
+    'เจาะลึกสเปกและกลไกเทคนิค': 'ระเบียบวิธีและกลไกหลัก',
+    'ตัวเลขและผลเปรียบเทียบ': 'ผลทดสอบและตัวเลขเปรียบเทียบ',
+    'การเข้าถึงและเงื่อนไขการใช้งาน': 'การเปิดเผยโค้ดและข้อจำกัดการทดลอง',
+  },
+};
+
+export function localizeSectionHeading(
+  sectionTitle: string | null,
+  category: NewsItem['category']
+): string | null {
+  if (!sectionTitle || !category) return sectionTitle;
+  const mapping = LEGACY_HEADING_BY_CATEGORY[category];
+  if (!mapping) return sectionTitle;
+  return mapping[sectionTitle] ?? sectionTitle;
+}
+
+// ============================================================================
+// Thai Word-Boundary Teaser Truncation (prevents mid-syllable clipping)
+// ============================================================================
+
+export function truncateThaiAtWordBoundary(
+  text: string,
+  maxChars: number
+): string {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.length <= maxChars) return trimmed;
+
+  try {
+    const IntlWithSegmenter = Intl as typeof Intl & {
+      Segmenter?: new (
+        locale: string,
+        opts: { granularity: 'word' }
+      ) => { segment: (s: string) => Iterable<{ segment: string; index: number }> };
+    };
+    if (IntlWithSegmenter.Segmenter) {
+      const seg = new IntlWithSegmenter.Segmenter('th', { granularity: 'word' });
+      let acc = '';
+      for (const part of seg.segment(trimmed)) {
+        if (acc.length + part.segment.length > maxChars) {
+          break;
+        }
+        acc += part.segment;
+      }
+      const cleanAcc = acc.trimEnd().replace(/[.,;:—–-]+$/, '').trimEnd();
+      if (cleanAcc.length >= Math.floor(maxChars * 0.5)) {
+        return `${cleanAcc}…`;
+      }
+    }
+  } catch {
+    // Fallback below
+  }
+
+  return `${trimmed.slice(0, maxChars).trimEnd()}…`;
 }
 
 // ============================================================================

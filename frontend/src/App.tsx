@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   ArrowRight,
+  BookOpen,
+  Calendar,
   Inbox,
   RefreshCw,
   Search,
@@ -636,6 +638,41 @@ export const App: React.FC = () => {
     [leadVerifiedStory]
   );
 
+  // Quiet-day continuation helper: when a daily edition has < 3 stories, surface a crisp
+  // CTA & quick-jump headline preview to the previous day's full edition without mixing dates/counts
+  const previousDayOption = useMemo<DayOption | null>(() => {
+    if (availableDays.length < 2) return null;
+    const idx = availableDays.findIndex((d) => d.key === selectedDay);
+    if (idx >= 0) return availableDays[idx + 1] ?? null;
+    return availableDays[1] ?? null;
+  }, [availableDays, selectedDay]);
+
+  const previousDayPreviewItems = useMemo<NewsItem[]>(() => {
+    if (!previousDayOption) return [];
+    return allNews
+      .filter(
+        (item) =>
+          item.status === 'verified' &&
+          getItemPublishedDay(item) === previousDayOption.key
+      )
+      .sort((a, b) => {
+        if (b.importance_score !== a.importance_score) {
+          return b.importance_score - a.importance_score;
+        }
+        return parseTimestamp(b.published_at) - parseTimestamp(a.published_at);
+      })
+      .slice(0, 4);
+  }, [allNews, previousDayOption]);
+
+  const showQuietDayContinuation =
+    viewMode === 'daily' &&
+    !showOnlyBookmarked &&
+    !isSearchActive &&
+    selectedCompany === 'ALL' &&
+    filteredAndSortedItems.length > 0 &&
+    filteredAndSortedItems.length < 3 &&
+    Boolean(previousDayOption);
+
   // Active viewable list matching exact visual render order for Prev/Next in ReaderModal
   const activeViewableList = useMemo(() => {
     if (activeVerifiedCategoryMeta) return currentTabVerifiedItems;
@@ -915,6 +952,8 @@ export const App: React.FC = () => {
                               className={`inline-flex items-center gap-1 text-[11px] font-medium ${
                                 leadTrustInfo.tier === 'official'
                                   ? 'text-verified'
+                                  : leadTrustInfo.tier === 'preprint'
+                                  ? 'text-editorial'
                                   : leadTrustInfo.tier === 'press_unconfirmed'
                                   ? 'text-rumor'
                                   : 'text-ink-muted'
@@ -922,6 +961,8 @@ export const App: React.FC = () => {
                             >
                               {leadTrustInfo.tier === 'official' ? (
                                 <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                              ) : leadTrustInfo.tier === 'preprint' ? (
+                                <BookOpen className="w-3.5 h-3.5 shrink-0" />
                               ) : leadTrustInfo.tier === 'press_unconfirmed' ? (
                                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                               ) : (
@@ -967,7 +1008,7 @@ export const App: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => handleSelectTab(cat.id)}
-                                className="inline-flex items-center gap-1 text-xs font-semibold text-editorial hover:underline shrink-0 py-1"
+                                className="inline-flex items-center gap-1 min-h-[44px] sm:min-h-0 px-2 -mr-2 sm:px-0 sm:mr-0 text-xs font-semibold text-editorial hover:underline shrink-0"
                               >
                                 <span>ดูทั้งหมวด</span>
                                 <ArrowRight className="w-3 h-3" />
@@ -990,6 +1031,87 @@ export const App: React.FC = () => {
                           </section>
                         );
                       })}
+
+                      {/* Quiet-Day Continuation Panel: clear path to yesterday's full edition */}
+                      {showQuietDayContinuation && previousDayOption && (
+                        <section
+                          aria-label="อ่านต่อฉบับก่อนหน้า"
+                          className="rounded-lg border border-rule bg-surface p-5 sm:p-6 space-y-4"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-rule">
+                            <div className="space-y-1">
+                              <div className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-editorial">
+                                <Calendar className="w-3.5 h-3.5 shrink-0" />
+                                <span>อ่านต่อฉบับก่อนหน้า</span>
+                              </div>
+                              <p className="text-sm font-semibold text-ink-primary">
+                                ฉบับวันที่ {formatThaiDateCE(selectedDay)} มี {filteredAndSortedItems.length} ข่าว — ดูฉบับวันที่ {previousDayOption.label} ({previousDayOption.count} ข่าว)
+                              </p>
+                              <p className="text-xs text-ink-muted">
+                                ข่าว AI ฝั่งสหรัฐฯ และยุโรปส่วนใหญ่จะทยอยเผยแพร่ช่วงดึกถึงเช้าวันถัดไป
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleSelectDay(previousDayOption.key)}
+                                className="inline-flex items-center gap-1.5 min-h-[44px] sm:min-h-0 sm:h-9 px-4 rounded-md text-xs font-semibold bg-ink-primary text-canvas hover:opacity-90 transition-opacity"
+                              >
+                                <span>
+                                  ดูฉบับ {previousDayOption.label} ({previousDayOption.count} ข่าว)
+                                </span>
+                                <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSelectViewMode('weekly')}
+                                className="inline-flex items-center min-h-[44px] sm:min-h-0 sm:h-9 px-3.5 rounded-md text-xs font-semibold border border-rule-strong bg-canvas text-ink-primary hover:bg-subtle transition-colors"
+                              >
+                                ดูรวมทั้งสัปดาห์
+                              </button>
+                            </div>
+                          </div>
+
+                          {previousDayPreviewItems.length > 0 && (
+                            <div className="space-y-2">
+                              <p className="text-[11px] font-semibold text-ink-muted">
+                                ข่าวเด่นจากฉบับวันที่ {previousDayOption.label} (คลิกอ่านได้ทันที)
+                              </p>
+                              <div className="divide-y divide-rule/70">
+                                {previousDayPreviewItems.map((prevItem) => {
+                                  const catMeta = VERIFIED_CATEGORIES.find(
+                                    (c) => c.id === prevItem.category
+                                  );
+                                  return (
+                                    <button
+                                      key={prevItem.id}
+                                      type="button"
+                                      onClick={() => handleOpenReader(prevItem)}
+                                      className="w-full py-2.5 text-left flex items-start justify-between gap-3 group hover:bg-subtle/40 -mx-2 px-2 rounded transition-colors"
+                                    >
+                                      <div className="min-w-0 space-y-0.5">
+                                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-muted">
+                                          <span className="font-semibold text-editorial">
+                                            {catMeta?.titleTh ?? 'ข่าว AI'}
+                                          </span>
+                                          <span aria-hidden="true">·</span>
+                                          <span>{prevItem.company_tags.join(' / ')}</span>
+                                          <span aria-hidden="true">·</span>
+                                          <span>{formatThaiDateCE(prevItem.published_at)}</span>
+                                        </div>
+                                        <p className="text-xs sm:text-[13.5px] font-semibold text-ink-primary group-hover:text-editorial transition-colors leading-snug">
+                                          {prevItem.title_th}
+                                        </p>
+                                      </div>
+                                      <ArrowRight className="w-3.5 h-3.5 text-ink-muted group-hover:text-editorial shrink-0 mt-1 transition-transform group-hover:translate-x-0.5" />
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </section>
+                      )}
                     </div>
 
                     {/* Right Isolated Column: Rumor Radar (15% Special Zone) */}
@@ -997,7 +1119,7 @@ export const App: React.FC = () => {
                       aria-label="Rumor Radar"
                       className="lg:col-span-4 xl:col-span-3 lg:sticky lg:top-28 space-y-4"
                     >
-                      <div className="pb-2 border-b-2 border-dashed border-rumor-border flex items-baseline justify-between gap-2">
+                      <div className="pb-2 border-b-2 border-dashed border-rumor-border flex items-center justify-between gap-2">
                         <div className="flex items-center gap-1.5 text-rumor">
                           <AlertTriangle className="w-4 h-4 shrink-0" />
                           <h2 className="font-heading text-sm font-bold uppercase tracking-wider">
@@ -1007,7 +1129,7 @@ export const App: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => handleSelectTab('rumor_radar')}
-                          className="text-[11px] font-semibold text-rumor hover:underline py-1"
+                          className="inline-flex items-center min-h-[44px] sm:min-h-0 px-2 -mr-2 sm:px-0 sm:mr-0 text-xs sm:text-[11px] font-semibold text-rumor hover:underline shrink-0"
                         >
                           เปิดหน้าเฉพาะ &rarr;
                         </button>
@@ -1027,7 +1149,13 @@ export const App: React.FC = () => {
 
                       {rumorItems.length === 0 ? (
                         <div className="p-5 rounded-lg border border-dashed border-rumor-border/60 bg-rumor-surface/50 text-xs text-ink-muted text-center">
-                          ไม่พบข่าวลือที่ตรงกับตัวกรอง
+                          {hasActiveFilters
+                            ? 'ไม่พบข่าวลือที่ตรงกับตัวกรองที่เลือก'
+                            : viewMode === 'daily'
+                            ? selectedDay === latestDay
+                              ? 'วันนี้ยังไม่มีข่าวลือ'
+                              : `วันที่ ${formatThaiDateCE(selectedDay)} ยังไม่มีข่าวลือ`
+                            : 'สัปดาห์นี้ยังไม่มีข่าวลือ'}
                         </div>
                       ) : (
                         <div className="space-y-3.5">

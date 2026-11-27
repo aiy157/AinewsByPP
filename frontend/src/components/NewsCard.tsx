@@ -5,6 +5,7 @@ import {
   Bookmark,
   ArrowRight,
   Newspaper,
+  BookOpen,
 } from 'lucide-react';
 import {
   NewsItem,
@@ -16,6 +17,7 @@ import {
   formatSourceSummary,
   formatThaiDateCE,
   getNewsTrustInfo,
+  truncateThaiAtWordBoundary,
 } from '../lib/editorialUtils';
 import { RichThaiText } from './RichThaiText';
 
@@ -99,6 +101,20 @@ export const NewsCard: React.FC<NewsCardProps> = ({
       : VERIFIED_CATEGORIES[0].titleTh;
 
   const teaserText = item.tldr_th || item.summary_bullets[0] || '';
+  const featuredTeaser =
+    fontScale === 'xlarge'
+      ? teaserText
+      : truncateThaiAtWordBoundary(
+          teaserText,
+          fontScale === 'large' ? 255 : 190
+        );
+  const compactTeaser =
+    fontScale === 'xlarge'
+      ? teaserText
+      : truncateThaiAtWordBoundary(
+          teaserText,
+          fontScale === 'large' ? 180 : 125
+        );
   const sourceSummary = formatSourceSummary(item.source_urls);
   const trustInfo = getNewsTrustInfo(item);
   const companyLabel =
@@ -122,6 +138,17 @@ export const NewsCard: React.FC<NewsCardProps> = ({
         >
           <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
           <span className="hidden sm:inline">{trustInfo.shortLabel}</span>
+        </span>
+      );
+    }
+    if (trustInfo.tier === 'preprint') {
+      return (
+        <span
+          title={trustInfo.tooltip}
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-editorial-soft text-editorial text-[10px] font-semibold"
+        >
+          <BookOpen className="w-3 h-3 shrink-0" />
+          <span>{trustInfo.shortLabel}</span>
         </span>
       );
     }
@@ -235,7 +262,7 @@ export const NewsCard: React.FC<NewsCardProps> = ({
               <p
                 className={`thai-prose break-words text-ink-secondary mb-4 ${FEATURED_CLAMP[fontScale]} ${TEASER_SCALE[fontScale]}`}
               >
-                {teaserText}
+                {featuredTeaser}
               </p>
 
               {/* Inline Key Facts Preview (Top 3 metrics — wraps cleanly at large font scales) */}
@@ -311,7 +338,9 @@ export const NewsCard: React.FC<NewsCardProps> = ({
                 <img
                   src={safeImageUrl!}
                   alt={item.title_th}
-                  loading="lazy"
+                  loading="eager"
+                  decoding="async"
+                  fetchPriority="high"
                   referrerPolicy="no-referrer"
                   onError={() => setImageFailed(true)}
                   className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
@@ -438,11 +467,11 @@ export const NewsCard: React.FC<NewsCardProps> = ({
             <RichThaiText text={item.title_th} variant="headline" />
           </h3>
 
-          {/* Executive TL;DR Preview (unclamped on xlarge so text never clips) */}
+          {/* Executive TL;DR Preview (clean Thai word boundary + unclamped on xlarge) */}
           <p
             className={`thai-prose break-words text-ink-secondary ${COMPACT_CLAMP[fontScale]} ${TEASER_SCALE[fontScale]}`}
           >
-            {teaserText}
+            {compactTeaser}
           </p>
         </div>
       </div>

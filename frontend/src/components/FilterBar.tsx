@@ -264,6 +264,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         <button
           type="button"
           aria-pressed={selectedCompany === 'ALL'}
+          title="จำนวนข่าวไม่ซ้ำทั้งหมด (ข่าว 1 ชิ้นอาจมีมากกว่า 1 แท็กค่าย ผลรวมรายค่ายจึงอาจมากกว่ายอดรวม)"
           onClick={() => onSelectCompany('ALL')}
           className={`min-h-[44px] sm:min-h-0 sm:h-7 px-3.5 sm:px-2.5 rounded-full text-xs transition-colors border ${
             selectedCompany === 'ALL'
@@ -293,7 +294,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               title={
                 isDisabled
                   ? `ยังไม่มีข่าว ${company} ในรายการที่เลือก`
-                  : `กรองเฉพาะข่าว ${company}`
+                  : `กรองเฉพาะข่าว ${company} (ข่าว 1 ชิ้นอาจอยู่ได้หลายแท็ก)`
               }
               onClick={() => onSelectCompany(company)}
               className={`min-h-[44px] sm:min-h-0 sm:h-7 px-3.5 sm:px-2.5 rounded-full text-xs transition-colors border ${
@@ -311,6 +312,17 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             </button>
           );
         })}
+
+        {!loading &&
+          ALL_COMPANIES.reduce((sum, c) => sum + (companyCounts[c] ?? 0), 0) >
+            (companyCounts['ALL'] ?? 0) && (
+            <span
+              title="ข่าว 1 ชิ้นสามารถติดแท็กได้มากกว่า 1 ค่าย เช่น OpenAI และ Open-Source"
+              className="text-[11px] text-ink-muted ml-1 hidden sm:inline"
+            >
+              (1 ข่าวอาจมีหลายแท็ก)
+            </span>
+          )}
       </div>
     </section>
   );

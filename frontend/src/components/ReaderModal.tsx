@@ -12,6 +12,7 @@ import {
   FileText,
   Link2,
   Newspaper,
+  BookOpen,
 } from 'lucide-react';
 import {
   NewsItem,
@@ -21,10 +22,13 @@ import {
 import { getSafeExternalUrl, getSafeImageUrl } from '../lib/urlSafety';
 import {
   buildShareableArticleUrl,
+  cleanLegacySectionBody,
   formatThaiDateCE,
   formatWeekLabelCE,
   getNewsTrustInfo,
   isEmptyTemplateFillerBody,
+  isPreprintSource,
+  localizeSectionHeading,
 } from '../lib/editorialUtils';
 import { RichThaiText, stripRumorPrefix } from './RichThaiText';
 import { FontScale } from './NewsCard';
@@ -229,10 +233,17 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
       ? CATEGORY_LABELS[item.category]
       : VERIFIED_CATEGORIES[0].titleTh;
 
-  // Hide obvious boilerplate-only N/A sections on legacy DB rows while keeping >= 2 real sections
-  const parsedSections = item.summary_bullets.map(splitSectionTitleAndBody);
+  // Map legacy generic headings by category, clean robotic N/A clauses & hide empty N/A sections
+  const parsedSections = item.summary_bullets.map((raw) => {
+    const { sectionTitle, sectionBody } = splitSectionTitleAndBody(raw);
+    return {
+      sectionTitle: localizeSectionHeading(sectionTitle, item.category),
+      sectionBody: cleanLegacySectionBody(sectionBody),
+      rawBody: sectionBody,
+    };
+  });
   const nonEmptySections = parsedSections.filter(
-    (sec) => !isEmptyTemplateFillerBody(sec.sectionBody)
+    (sec) => !isEmptyTemplateFillerBody(sec.rawBody)
   );
   const sectionsToRender =
     nonEmptySections.length >= 2 ? nonEmptySections : parsedSections;
@@ -334,6 +345,8 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
               >
                 {trustInfo.tier === 'official' ? (
                   <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-verified" />
+                ) : trustInfo.tier === 'preprint' ? (
+                  <BookOpen className="w-3.5 h-3.5 shrink-0 text-editorial" />
                 ) : trustInfo.tier === 'press_unconfirmed' ? (
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-rumor" />
                 ) : (
@@ -538,6 +551,15 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
             </div>
           )}
 
+          {!isRumor && trustInfo.tier === 'preprint' && (
+            <div className="mb-6 pl-4 py-2.5 pr-4 border-l-2 border-editorial bg-editorial-soft text-xs sm:text-[13px] text-ink-secondary leading-relaxed">
+              <strong className="text-editorial font-semibold">
+                หมายเหตุงานวิจัย (ArXiv พรีปรินต์):
+              </strong>{' '}
+              สรุปจากเอกสารงานวิจัยต้นฉบับที่ผู้วิจัยเผยแพร่บน ArXiv ซึ่งอาจยังไม่ผ่านกระบวนการตรวจสอบโดยผู้เชี่ยวชาญ (Peer Review)
+            </div>
+          )}
+
           {/* Layer 1C: Optional Real Source Image (16:9 Full Width with Credit Caption) */}
           {hasVisibleImage && (
             <figure className="mb-7 space-y-2">
@@ -625,28 +647,37 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
               </div>
 
               <div className="divide-y divide-rule border border-rule rounded-lg bg-canvas/60 overflow-hidden">
-                {officialLinks.map((src, i) => (
-                  <a
-                    key={`off-${i}`}
-                    href={src.safeUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-between gap-3 px-4 py-3 sm:py-2.5 hover:bg-subtle/70 transition-colors"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-verified-soft text-verified">
-                        แหล่งทางการ
-                      </span>
-                      <span className="text-xs font-semibold text-ink-primary truncate">
-                        {src.title}
-                      </span>
-                      <span className="hidden sm:inline text-[11px] text-ink-muted truncate">
-                        {getHostname(src.safeUrl)}
-                      </span>
-                    </div>
-                    <ExternalLink className="w-3.5 h-3.5 text-ink-muted shrink-0" />
-                  </a>
-                ))}
+                {officialLinks.map((src, i) => {
+                  const isPreprint = isPreprintSource(src);
+                  return (
+                    <a
+                      key={`off-${i}`}
+                      href={src.safeUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between gap-3 px-4 py-3 sm:py-2.5 hover:bg-subtle/70 transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span
+                          className={`shrink-0 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                            isPreprint
+                              ? 'bg-editorial-soft text-editorial'
+                              : 'bg-verified-soft text-verified'
+                          }`}
+                        >
+                          {isPreprint ? 'พรีปรินต์ ArXiv' : 'แหล่งทางการ'}
+                        </span>
+                        <span className="text-xs font-semibold text-ink-primary truncate">
+                          {src.title}
+                        </span>
+                        <span className="hidden sm:inline text-[11px] text-ink-muted truncate">
+                          {getHostname(src.safeUrl)}
+                        </span>
+                      </div>
+                      <ExternalLink className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+                    </a>
+                  );
+                })}
 
                 {referenceLinks.map((src, i) => (
                   <a
