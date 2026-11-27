@@ -76,8 +76,16 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
 export interface FetchNewsResult {
   items: NewsItem[];
   source: 'supabase' | 'mock';
+  hasMoreArchive: boolean;
   errorMessage?: string;
 }
+
+const NEWS_SELECT_COLUMNS =
+  'id,week_id,batch_type,status,category,company_tags,image_url,image_credit,title_th,tldr_th,key_facts,summary_bullets,source_urls,importance_score,cluster_slug,published_at,created_at,updated_at';
+
+const INITIAL_FAST_LIMIT = 24;
+const ARCHIVE_PAGE_SIZE = 250;
+const MAX_ARCHIVE_ROWS = 2000;
 
 function normalizeNewsRow(raw: Record<string, unknown>): NewsItem | null {
   const id = typeof raw.id === 'string' && raw.id.trim() ? raw.id : null;
@@ -100,16 +108,29 @@ function normalizeNewsRow(raw: Record<string, unknown>): NewsItem | null {
     batch_type: raw.batch_type === 'weekend' ? 'weekend' : 'midweek',
     status,
     category,
-    company_tags: Array.isArray(raw.company_tags) && raw.company_tags.length > 0
-      ? (raw.company_tags as NewsItem['company_tags'])
-      : ['Other'],
-    image_url: typeof raw.image_url === 'string' && raw.image_url.trim() ? raw.image_url.trim() : null,
-    image_credit: typeof raw.image_credit === 'string' && raw.image_credit.trim() ? raw.image_credit.trim() : null,
+    company_tags:
+      Array.isArray(raw.company_tags) && raw.company_tags.length > 0
+        ? (raw.company_tags as NewsItem['company_tags'])
+        : ['Other'],
+    image_url:
+      typeof raw.image_url === 'string' && raw.image_url.trim()
+        ? raw.image_url.trim()
+        : null,
+    image_credit:
+      typeof raw.image_credit === 'string' && raw.image_credit.trim()
+        ? raw.image_credit.trim()
+        : null,
     title_th: titleTh,
     tldr_th: typeof raw.tldr_th === 'string' ? raw.tldr_th : '',
-    key_facts: Array.isArray(raw.key_facts) ? (raw.key_facts as NewsItem['key_facts']) : [],
-    summary_bullets: Array.isArray(raw.summary_bullets) ? (raw.summary_bullets as string[]) : [],
-    source_urls: Array.isArray(raw.source_urls) ? (raw.source_urls as NewsItem['source_urls']) : [],
+    key_facts: Array.isArray(raw.key_facts)
+      ? (raw.key_facts as NewsItem['key_facts'])
+      : [],
+    summary_bullets: Array.isArray(raw.summary_bullets)
+      ? (raw.summary_bullets as string[])
+      : [],
+    source_urls: Array.isArray(raw.source_urls)
+      ? (raw.source_urls as NewsItem['source_urls'])
+      : [],
     importance_score:
       typeof raw.importance_score === 'number' && Number.isFinite(raw.importance_score)
         ? raw.importance_score
@@ -124,64 +145,100 @@ function normalizeNewsRow(raw: Record<string, unknown>): NewsItem | null {
   };
 }
 
-export async function fetchAllNewsItems(forceMock = false): Promise<FetchNewsResult> {
+/**
+ * Phase 1 (Fast First Paint): Fetches only the newest 24 published stories first
+ * so the latest daily edition renders quickly with a fraction of full-archive egress.
+ */
+export async function fetchInitialNewsItems(
+  forceMock = false
+): Promise<FetchNewsResult> {
   if (forceMock || !supabase) {
     return {
       items: MOCK_NEWS_ITEMS,
       source: 'mock',
+      hasMoreArchive: false,
       errorMessage: forceMock
         ? undefined
-        : 'ยังไม่พบค่า Public Key ของ Supabase — แสดงข้อมูลตัวอย่าง Mock Data ชั่วคราว',
+        : 'ยังไม่พบค่า Public Key ของ Supabase — แสดงข้อมูลตัวอย่างชั่วคราว',
     };
   }
 
   try {
-    // Paginate cleanly past PostgREST's 1,000-row cap while bounding max egress
-    const PAGE_SIZE = 500;
-    const MAX_ROWS = 2000;
-    const collected: NewsItem[] = [];
+    const { data, error } = await supabase
+      .from('news_items')
+      .select(NEWS_SELECT_COLUMNS)
+      .order('published_at', { ascending: false })
+      .order('importance_score', { ascending: false })
+      .range(0, INITIAL_FAST_LIMIT - 1);
 
-    for (let offset = 0; offset < MAX_ROWS; offset += PAGE_SIZE) {
+    if (error) {
+      throw new Error('supabase_query_failed');
+    }
+
+    const batch = (data ?? [])
+      .map((row) => normalizeNewsRow(row as Record<string, unknown>))
+      .filter((item): item is NewsItem => item !== null);
+
+    if (batch.length === 0) {
+      return {
+        items: MOCK_NEWS_ITEMS,
+        source: 'mock',
+        hasMoreArchive: false,
+        errorMessage: 'ยังไม่มีข้อมูลในระบบ — แสดงข้อมูลตัวอย่างชั่วคราว',
+      };
+    }
+
+    return {
+      items: batch,
+      source: 'supabase',
+      hasMoreArchive: (data ?? []).length === INITIAL_FAST_LIMIT,
+    };
+  } catch {
+    return {
+      items: MOCK_NEWS_ITEMS,
+      source: 'mock',
+      hasMoreArchive: false,
+      errorMessage: 'เชื่อมต่อฐานข้อมูลไม่สำเร็จในขณะนี้ — สลับมาแสดงข้อมูลตัวอย่างชั่วคราว',
+    };
+  }
+}
+
+/**
+ * Phase 2 (Silent Background Hydration): Fetches older archive rows after first paint
+ * so date archives, weekly views, and global archive search work seamlessly.
+ */
+export async function fetchRemainingArchiveItems(
+  startOffset = INITIAL_FAST_LIMIT
+): Promise<NewsItem[]> {
+  if (!supabase) return [];
+
+  try {
+    const collected: NewsItem[] = [];
+    for (
+      let offset = startOffset;
+      offset < MAX_ARCHIVE_ROWS;
+      offset += ARCHIVE_PAGE_SIZE
+    ) {
       const { data, error } = await supabase
         .from('news_items')
-        .select('*')
-        .order('week_id', { ascending: false })
-        .order('created_at', { ascending: false })
+        .select(NEWS_SELECT_COLUMNS)
         .order('published_at', { ascending: false })
         .order('importance_score', { ascending: false })
-        .range(offset, offset + PAGE_SIZE - 1);
+        .range(offset, offset + ARCHIVE_PAGE_SIZE - 1);
 
-      if (error) {
-        throw new Error('supabase_query_failed');
-      }
+      if (error) break;
 
       const batch = (data ?? [])
         .map((row) => normalizeNewsRow(row as Record<string, unknown>))
         .filter((item): item is NewsItem => item !== null);
 
       collected.push(...batch);
-      if ((data ?? []).length < PAGE_SIZE) {
+      if ((data ?? []).length < ARCHIVE_PAGE_SIZE) {
         break;
       }
     }
-
-    if (collected.length === 0) {
-      return {
-        items: MOCK_NEWS_ITEMS,
-        source: 'mock',
-        errorMessage: 'ยังไม่มีข้อมูลในตาราง Supabase (แสดงข้อมูลตัวอย่าง Mock Data แทนชั่วคราว)',
-      };
-    }
-
-    return {
-      items: collected,
-      source: 'supabase',
-    };
+    return collected;
   } catch {
-    return {
-      items: MOCK_NEWS_ITEMS,
-      source: 'mock',
-      errorMessage: 'เชื่อมต่อฐานข้อมูลไม่สำเร็จในขณะนี้ — สลับมาแสดงข้อมูลตัวอย่างชั่วคราว',
-    };
+    return [];
   }
 }

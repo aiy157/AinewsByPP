@@ -10,6 +10,8 @@ import {
   ChevronLeft,
   ChevronRight,
   FileText,
+  Link2,
+  Newspaper,
 } from 'lucide-react';
 import {
   NewsItem,
@@ -17,8 +19,15 @@ import {
   VerifiedCategory,
 } from '../types/news';
 import { getSafeExternalUrl, getSafeImageUrl } from '../lib/urlSafety';
+import {
+  buildShareableArticleUrl,
+  formatThaiDateCE,
+  formatWeekLabelCE,
+  getNewsTrustInfo,
+  isEmptyTemplateFillerBody,
+} from '../lib/editorialUtils';
 import { RichThaiText, stripRumorPrefix } from './RichThaiText';
-import { FontScale, formatThaiDate } from './NewsCard';
+import { FontScale } from './NewsCard';
 
 interface ReaderModalProps {
   item: NewsItem | null;
@@ -48,7 +57,8 @@ function splitSectionTitleAndBody(rawBullet: string): {
   if (colonIdx > 2 && colonIdx <= 46) {
     const before = rawBullet.slice(0, colonIdx);
     const after = rawBullet.slice(colonIdx + 1);
-    const isUrlColon = after.startsWith('//') || /^https?$/i.test(before.trim());
+    const isUrlColon =
+      after.startsWith('//') || /^https?$/i.test(before.trim());
     const isTimeColon = /\d$/.test(before) && /^\d/.test(after);
     if (!isUrlColon && !isTimeColon) {
       return {
@@ -71,6 +81,27 @@ function getHostname(url: string): string {
   }
 }
 
+async function copyTextToClipboard(payload: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(payload);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = payload;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
 export const ReaderModal: React.FC<ReaderModalProps> = ({
   item,
   onClose,
@@ -83,7 +114,9 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
   hasPrev = false,
   hasNext = false,
 }) => {
-  const [copied, setCopied] = useState(false);
+  const [copiedMode, setCopiedMode] = useState<'none' | 'summary' | 'link'>(
+    'none'
+  );
   const [imageFailed, setImageFailed] = useState(false);
   const copyTimerRef = React.useRef<number | null>(null);
   const dialogRef = React.useRef<HTMLDivElement>(null);
@@ -93,7 +126,7 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
   // Reset image error, copy state & scroll position whenever switching stories
   useEffect(() => {
     setImageFailed(false);
-    setCopied(false);
+    setCopiedMode('none');
     if (copyTimerRef.current !== null) {
       window.clearTimeout(copyTimerRef.current);
       copyTimerRef.current = null;
@@ -103,7 +136,6 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
     }
   }, [item?.id]);
 
-  // Clean up timer on unmount
   useEffect(() => {
     return () => {
       if (copyTimerRef.current !== null) {
@@ -183,6 +215,7 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
   if (!item) return null;
 
   const isRumor = item.status === 'rumor';
+  const trustInfo = getNewsTrustInfo(item);
   const safeImageUrl = getSafeImageUrl(item.image_url, true);
   const hasVisibleImage = Boolean(safeImageUrl && !imageFailed);
   const safeSourceLinks = item.source_urls
@@ -196,8 +229,34 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
       ? CATEGORY_LABELS[item.category]
       : VERIFIED_CATEGORIES[0].titleTh;
 
-  const handleCopy = async () => {
+  // Hide obvious boilerplate-only N/A sections on legacy DB rows while keeping >= 2 real sections
+  const parsedSections = item.summary_bullets.map(splitSectionTitleAndBody);
+  const nonEmptySections = parsedSections.filter(
+    (sec) => !isEmptyTemplateFillerBody(sec.sectionBody)
+  );
+  const sectionsToRender =
+    nonEmptySections.length >= 2 ? nonEmptySections : parsedSections;
+
+  const triggerCopyFeedback = (mode: 'summary' | 'link') => {
+    setCopiedMode(mode);
+    if (copyTimerRef.current !== null) {
+      window.clearTimeout(copyTimerRef.current);
+    }
+    copyTimerRef.current = window.setTimeout(() => {
+      setCopiedMode('none');
+      copyTimerRef.current = null;
+    }, 2000);
+  };
+
+  const handleCopyLink = async () => {
+    const shareUrl = buildShareableArticleUrl(item.cluster_slug);
+    const ok = await copyTextToClipboard(shareUrl);
+    if (ok) triggerCopyFeedback('link');
+  };
+
+  const handleCopySummary = async () => {
     const cleanTitle = stripRumorPrefix(item.title_th);
+    const shareUrl = buildShareableArticleUrl(item.cluster_slug);
     const keyFactsText =
       item.key_facts && item.key_facts.length > 0
         ? [
@@ -213,42 +272,17 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
       item.tldr_th,
       '',
       ...keyFactsText,
-      ...item.summary_bullets.map((b) => `• ${b}`),
+      ...sectionsToRender.map((sec) =>
+        sec.sectionTitle ? `• ${sec.sectionTitle}: ${sec.sectionBody}` : `• ${sec.sectionBody}`
+      ),
       '',
+      `อ่านบน AINEWS: ${shareUrl}`,
       'แหล่งอ้างอิง:',
       ...safeSourceLinks.map((s) => `- ${s.title}: ${s.safeUrl}`),
     ];
 
-    const payload = lines.join('\n');
-    let ok = false;
-    try {
-      await navigator.clipboard.writeText(payload);
-      ok = true;
-    } catch {
-      try {
-        const ta = document.createElement('textarea');
-        ta.value = payload;
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.select();
-        ok = document.execCommand('copy');
-        document.body.removeChild(ta);
-      } catch {
-        ok = false;
-      }
-    }
-
-    if (ok) {
-      setCopied(true);
-      if (copyTimerRef.current !== null) {
-        window.clearTimeout(copyTimerRef.current);
-      }
-      copyTimerRef.current = window.setTimeout(() => {
-        setCopied(false);
-        copyTimerRef.current = null;
-      }, 2000);
-    }
+    const ok = await copyTextToClipboard(lines.join('\n'));
+    if (ok) triggerCopyFeedback('summary');
   };
 
   const proseSizeClass =
@@ -284,25 +318,36 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Sticky Minimal Reader Toolbar */}
-        <div className="shrink-0 px-4 sm:px-8 py-3 border-b border-rule flex items-center justify-between gap-2 sm:gap-3 bg-surface/95 backdrop-blur">
+        <div className="shrink-0 px-3 sm:px-8 py-2.5 sm:py-3 border-b border-rule flex items-center justify-between gap-2 sm:gap-3 bg-surface/95 backdrop-blur">
           <div className="flex items-center gap-2 text-xs min-w-0 flex-1">
             {isRumor ? (
               <span className="inline-flex items-center gap-1.5 font-bold text-rumor min-w-0">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">Rumor Radar · ยังไม่ยืนยันทางการ</span>
+                <span className="truncate">
+                  Rumor Radar · ยังไม่ยืนยันทางการ
+                </span>
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1.5 font-semibold text-verified min-w-0">
-                <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+              <span
+                title={trustInfo.tooltip}
+                className="inline-flex items-center gap-1.5 font-semibold min-w-0"
+              >
+                {trustInfo.tier === 'official' ? (
+                  <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-verified" />
+                ) : trustInfo.tier === 'press_unconfirmed' ? (
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-rumor" />
+                ) : (
+                  <Newspaper className="w-3.5 h-3.5 shrink-0 text-ink-muted" />
+                )}
                 <span className="text-editorial truncate">{categoryLabel}</span>
               </span>
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            {/* Font Scale (accessible on mobile & desktop) */}
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            {/* Font Scale */}
             <div
-              className="inline-flex items-center h-7 rounded border border-rule bg-canvas p-0.5"
+              className="inline-flex items-center h-9 sm:h-7 rounded border border-rule bg-canvas p-0.5"
               role="group"
               aria-label="ปรับขนาดตัวอักษร"
             >
@@ -314,7 +359,7 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
                     type="button"
                     aria-pressed={fontScale === scale}
                     onClick={() => onChangeFontScale(scale)}
-                    className={`h-6 px-1.5 sm:px-2 rounded text-[11px] font-semibold transition-colors ${
+                    className={`h-7 sm:h-6 px-1.5 sm:px-2 rounded text-[11px] font-semibold transition-colors ${
                       fontScale === scale
                         ? 'bg-ink-primary text-canvas'
                         : 'text-ink-muted hover:text-ink-primary'
@@ -326,14 +371,52 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
               })}
             </div>
 
+            {/* Share Direct Link */}
             <button
               type="button"
-              onClick={() => void handleCopy()}
-              aria-label={copied ? 'คัดลอกบทสรุปแล้ว' : 'คัดลอกบทสรุปข่าว'}
-              title={copied ? 'คัดลอกบทสรุปแล้ว' : 'คัดลอกบทสรุปข่าว'}
-              className="inline-flex items-center gap-1.5 h-7 px-2 sm:px-2.5 rounded text-xs font-medium border border-rule bg-canvas hover:border-rule-strong text-ink-secondary hover:text-ink-primary transition-colors"
+              onClick={() => void handleCopyLink()}
+              aria-label={
+                copiedMode === 'link'
+                  ? 'คัดลอกลิงก์บทความแล้ว'
+                  : 'คัดลอกลิงก์บทความ'
+              }
+              title={
+                copiedMode === 'link'
+                  ? 'คัดลอกลิงก์บทความแล้ว'
+                  : 'คัดลอกลิงก์บทความเพื่อแชร์'
+              }
+              className="inline-flex items-center gap-1.5 h-9 sm:h-7 px-2.5 rounded text-xs font-medium border border-rule bg-canvas hover:border-rule-strong text-ink-secondary hover:text-ink-primary transition-colors"
             >
-              {copied ? (
+              {copiedMode === 'link' ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-verified" />
+                  <span className="hidden sm:inline">คัดลอกลิงก์แล้ว</span>
+                </>
+              ) : (
+                <>
+                  <Link2 className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">แชร์ลิงก์</span>
+                </>
+              )}
+            </button>
+
+            {/* Copy Summary */}
+            <button
+              type="button"
+              onClick={() => void handleCopySummary()}
+              aria-label={
+                copiedMode === 'summary'
+                  ? 'คัดลอกบทสรุปแล้ว'
+                  : 'คัดลอกบทสรุปข่าว'
+              }
+              title={
+                copiedMode === 'summary'
+                  ? 'คัดลอกบทสรุปแล้ว'
+                  : 'คัดลอกบทสรุปข่าว'
+              }
+              className="inline-flex items-center gap-1.5 h-9 sm:h-7 px-2.5 rounded text-xs font-medium border border-rule bg-canvas hover:border-rule-strong text-ink-secondary hover:text-ink-primary transition-colors"
+            >
+              {copiedMode === 'summary' ? (
                 <>
                   <Check className="w-3.5 h-3.5 text-verified" />
                   <span className="hidden sm:inline">คัดลอกแล้ว</span>
@@ -346,13 +429,14 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
               )}
             </button>
 
+            {/* Bookmark */}
             <button
               type="button"
               onClick={() => onToggleBookmark(item.id)}
               aria-pressed={isBookmarked}
               aria-label={isBookmarked ? 'นำออกจากที่บันทึกไว้' : 'บันทึกข่าวนี้'}
               title={isBookmarked ? 'นำออกจากที่บันทึกไว้' : 'บันทึกข่าวนี้'}
-              className={`inline-flex items-center gap-1.5 h-7 px-2 sm:px-2.5 rounded text-xs font-medium border transition-colors ${
+              className={`inline-flex items-center gap-1.5 h-9 sm:h-7 px-2.5 rounded text-xs font-medium border transition-colors ${
                 isBookmarked
                   ? 'bg-editorial text-white border-editorial dark:text-slate-950'
                   : 'border-rule bg-canvas hover:border-rule-strong text-ink-secondary hover:text-ink-primary'
@@ -366,12 +450,13 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
               </span>
             </button>
 
+            {/* Close */}
             <button
               type="button"
               onClick={onClose}
               aria-label="ปิดหน้าต่าง"
               title="ปิดหน้าต่าง (Esc)"
-              className="inline-flex items-center justify-center w-7 h-7 rounded text-ink-muted hover:text-ink-primary hover:bg-subtle transition-colors ml-0.5"
+              className="inline-flex items-center justify-center w-9 h-9 sm:w-7 sm:h-7 rounded text-ink-muted hover:text-ink-primary hover:bg-subtle transition-colors ml-0.5"
             >
               <X className="w-4 h-4" />
             </button>
@@ -383,7 +468,7 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
           ref={scrollRef}
           className="editorial-scroll overscroll-contain flex-1 overflow-y-auto px-5 sm:px-10 py-7 sm:py-9"
         >
-          {/* Article Metadata Line */}
+          {/* Article Metadata Line (Unified Common Era & Human-Readable Week) */}
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-ink-muted mb-3.5">
             {item.company_tags.length > 0 && (
               <>
@@ -395,13 +480,29 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
                 </span>
               </>
             )}
-            <span>
-              สัปดาห์ {item.week_id} ({item.batch_type === 'midweek' ? 'ต้นสัปดาห์' : 'ปลายสัปดาห์'})
-            </span>
+            <span>{formatThaiDateCE(item.published_at)}</span>
             <span aria-hidden="true" className="text-rule-strong">
               /
             </span>
-            <span>{formatThaiDate(item.published_at)}</span>
+            <span>{formatWeekLabelCE(item.week_id)}</span>
+            {!isRumor && (
+              <>
+                <span aria-hidden="true" className="text-rule-strong">
+                  /
+                </span>
+                <span
+                  className={
+                    trustInfo.tier === 'official'
+                      ? 'text-verified font-medium'
+                      : trustInfo.tier === 'press_unconfirmed'
+                      ? 'text-rumor font-medium'
+                      : 'text-ink-secondary font-medium'
+                  }
+                >
+                  {trustInfo.fullLabel}
+                </span>
+              </>
+            )}
           </div>
 
           {/* Layer 1A: Authoritative Headline */}
@@ -418,11 +519,22 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
             </p>
           )}
 
-          {/* Editorial Caution Strip for Unconfirmed Rumors */}
+          {/* Editorial Caution Strip for Unconfirmed Rumors OR Unconfirmed Press Scoops */}
           {isRumor && (
             <div className="mb-6 pl-4 py-2.5 pr-4 border-l-2 border-rumor bg-rumor-soft text-xs sm:text-[13px] text-ink-secondary leading-relaxed">
-              <strong className="text-rumor font-semibold">หมายเหตุบรรณาธิการ:</strong>{' '}
+              <strong className="text-rumor font-semibold">
+                หมายเหตุบรรณาธิการ:
+              </strong>{' '}
               ประเด็นนี้รวบรวมจากคอมมูนิตี้นักพัฒนา AI (Hacker News / Lobste.rs / คอมมูนิตี้อิสระ) และยังไม่มีประกาศยืนยันอย่างเป็นทางการจากบริษัทผู้พัฒนา
+            </div>
+          )}
+
+          {!isRumor && trustInfo.tier === 'press_unconfirmed' && (
+            <div className="mb-6 pl-4 py-2.5 pr-4 border-l-2 border-rumor bg-rumor-soft text-xs sm:text-[13px] text-ink-secondary leading-relaxed">
+              <strong className="text-rumor font-semibold">
+                หมายเหตุแหล่งข่าว:
+              </strong>{' '}
+              ข่าวนี้เป็นรายงานจากสื่อเทคโนโลยีโดยอ้างแหล่งข่าวภายนอก ยังไม่มีคำแถลงยืนยันอย่างเป็นทางการจากบริษัทหรือหน่วยงานที่เกี่ยวข้อง
             </div>
           )}
 
@@ -446,11 +558,11 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
             </figure>
           )}
 
-          {/* Layer 2: Key Facts Quick-Scan Strip (Bloomberg / Economist Editorial Grid) */}
+          {/* Layer 2: Key Facts Quick-Scan Strip (Never clips labels/values on large scale) */}
           {item.key_facts && item.key_facts.length > 0 && (
             <div
               aria-label="สรุปข้อเท็จจริงและตัวเลขสำคัญ"
-              className={`grid grid-cols-2 sm:grid-cols-4 gap-4 py-4 px-4 mb-8 rounded-lg border ${
+              className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 py-4 px-4 mb-8 rounded-lg border ${
                 isRumor
                   ? 'bg-rumor-soft border-rumor-border/50'
                   : 'bg-canvas/80 border-rule'
@@ -459,12 +571,19 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
               {item.key_facts.map((fact, idx) => (
                 <div key={idx} className="space-y-0.5 min-w-0">
                   <div
-                    title={fact.label}
-                    className="text-[11px] font-medium text-ink-muted truncate"
+                    className={`font-medium text-ink-muted break-words ${
+                      fontScale === 'xlarge' ? 'text-xs' : 'text-[11px]'
+                    }`}
                   >
                     {fact.label}
                   </div>
-                  <div className="text-xs sm:text-[13px] font-bold text-ink-primary leading-snug break-words">
+                  <div
+                    className={`font-bold text-ink-primary leading-snug break-words ${
+                      fontScale === 'xlarge'
+                        ? 'text-sm'
+                        : 'text-xs sm:text-[13px]'
+                    }`}
+                  >
                     {fact.value}
                   </div>
                 </div>
@@ -472,30 +591,29 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
             </div>
           )}
 
-          {/* Layer 3: Ultra-Detailed 5-Dimension Editorial Sections */}
+          {/* Layer 3: Editorial Deep-Dive Sections */}
           <div className="space-y-6 mb-9">
-            {item.summary_bullets.map((bullet, idx) => {
-              const { sectionTitle, sectionBody } = splitSectionTitleAndBody(bullet);
-              return (
-                <section
-                  key={idx}
-                  className="space-y-1.5 pb-5 border-b border-rule/70 last:border-b-0 last:pb-0"
+            {sectionsToRender.map(({ sectionTitle, sectionBody }, idx) => (
+              <section
+                key={idx}
+                className="space-y-1.5 pb-5 border-b border-rule/70 last:border-b-0 last:pb-0"
+              >
+                {sectionTitle && (
+                  <h3
+                    className={`font-heading text-xs sm:text-[13.5px] font-bold tracking-wide ${
+                      isRumor ? 'text-rumor' : 'text-editorial'
+                    }`}
+                  >
+                    {sectionTitle}
+                  </h3>
+                )}
+                <p
+                  className={`thai-prose break-words text-ink-secondary ${proseSizeClass}`}
                 >
-                  {sectionTitle && (
-                    <h3
-                      className={`font-heading text-xs sm:text-[13.5px] font-bold tracking-wide ${
-                        isRumor ? 'text-rumor' : 'text-editorial'
-                      }`}
-                    >
-                      {sectionTitle}
-                    </h3>
-                  )}
-                  <p className={`thai-prose break-words text-ink-secondary ${proseSizeClass}`}>
-                    <RichThaiText text={sectionBody} variant="prose" />
-                  </p>
-                </section>
-              );
-            })}
+                  <RichThaiText text={sectionBody} variant="prose" />
+                </p>
+              </section>
+            ))}
           </div>
 
           {/* Layer 4: Authoritative Citations & Primary Sources Table */}
@@ -513,11 +631,11 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
                     href={src.safeUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-subtle/70 transition-colors"
+                    className="flex items-center justify-between gap-3 px-4 py-3 sm:py-2.5 hover:bg-subtle/70 transition-colors"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
                       <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-verified-soft text-verified">
-                        Official
+                        แหล่งทางการ
                       </span>
                       <span className="text-xs font-semibold text-ink-primary truncate">
                         {src.title}
@@ -536,7 +654,7 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
                     href={src.safeUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-subtle/70 transition-colors"
+                    className="flex items-center justify-between gap-3 px-4 py-3 sm:py-2.5 hover:bg-subtle/70 transition-colors"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
                       <span
@@ -546,7 +664,7 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
                             : 'bg-subtle text-ink-secondary'
                         }`}
                       >
-                        {isRumor ? 'Community' : 'Reference'}
+                        {isRumor ? 'คอมมูนิตี้' : 'สื่ออ้างอิง'}
                       </span>
                       <span className="text-xs font-medium text-ink-primary truncate">
                         {src.title}
@@ -564,12 +682,12 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
         </div>
 
         {/* Sticky Bottom Story Switcher */}
-        <div className="shrink-0 px-5 sm:px-8 py-3 border-t border-rule bg-surface/95 flex items-center justify-between gap-3">
+        <div className="shrink-0 px-4 sm:px-8 py-2.5 sm:py-3 border-t border-rule bg-surface/95 flex items-center justify-between gap-3">
           <button
             type="button"
             disabled={!hasPrev}
             onClick={onPrev}
-            className={`inline-flex items-center gap-1 h-8 px-3 rounded text-xs font-semibold transition-colors ${
+            className={`inline-flex items-center gap-1 h-10 sm:h-8 px-3 rounded text-xs font-semibold transition-colors ${
               hasPrev
                 ? 'text-ink-primary hover:bg-subtle'
                 : 'text-ink-muted/40 cursor-not-allowed'
@@ -587,7 +705,7 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
             type="button"
             disabled={!hasNext}
             onClick={onNext}
-            className={`inline-flex items-center gap-1 h-8 px-3 rounded text-xs font-semibold transition-colors ${
+            className={`inline-flex items-center gap-1 h-10 sm:h-8 px-3 rounded text-xs font-semibold transition-colors ${
               hasNext
                 ? 'text-ink-primary hover:bg-subtle'
                 : 'text-ink-muted/40 cursor-not-allowed'

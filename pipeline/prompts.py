@@ -53,7 +53,7 @@ except ImportError:
 # 1. Constants & UI / Schema Contracts
 # ==============================================================================
 
-PROMPT_VERSION = "2.2.0"
+PROMPT_VERSION = "2.3.0"
 
 DEFAULT_STAGE1_MODEL = "claude-haiku-5-5"
 DEFAULT_STAGE2_MODEL = "claude-sonnet-5-5"
@@ -69,12 +69,41 @@ VERIFIED_SECTION_PREFIXES: Tuple[str, ...] = (
     "ผลกระทบและข้อสังเกตที่ควรรู้:",
 )
 
+VERIFIED_CATEGORY_SECTION_PREFIXES: Dict[str, Tuple[str, ...]] = {
+    "models_updates": VERIFIED_SECTION_PREFIXES,
+    "benchmarks_testing": (
+        "ที่มาและโจทย์วิจัย:",
+        "ระเบียบวิธีและกลไกหลัก:",
+        "ผลทดสอบและตัวเลขเปรียบเทียบ:",
+        "การเปิดเผยโค้ดและข้อจำกัดการทดลอง:",
+        "ผลกระทบและข้อสังเกตที่ควรรู้:",
+    ),
+    "partnerships_deals": (
+        "ที่มาและบริบทดีล:",
+        "รายละเอียดข้อตกลงและขอบเขต:",
+        "มูลค่า ตัวเลข และไทม์ไลน์:",
+        "โครงสร้างการดำเนินงานและคู่สัญญา:",
+        "ผลกระทบต่อตลาดและข้อสังเกตที่ควรรู้:",
+    ),
+    "policy_rules": (
+        "ที่มาและบริบทนโยบาย:",
+        "สาระสำคัญและขอบเขตการบังคับใช้:",
+        "ไทม์ไลน์ กลุ่มเป้าหมาย และตัวเลขสำคัญ:",
+        "ท่าทีผู้เกี่ยวข้องและช่องทางปฏิบัติตาม:",
+        "ผลกระทบต่ออุตสาหกรรมและข้อสังเกตที่ควรรู้:",
+    ),
+}
+
 RUMOR_SECTION_PREFIXES: Tuple[str, ...] = (
     "จุดเริ่มต้นของเบาะแส:",
     "รายละเอียดสเปกที่หลุดออกมา:",
     "หลักฐานและบริบทแวดล้อม:",
     "ผลกระทบที่คาดการณ์:",
     "ระดับความน่าเชื่อถือและข้อควรระวัง:",
+)
+
+_TEMPLATE_FILLER_RE = re.compile(
+    r"(?:ไม่ใช่การเปิดตัว(?:สินค้า|ผลิตภัณฑ์|โมเดล)[^。\n]{0,120}(?:ไม่มีช่องทาง|ไม่มีไลเซนส์|ไม่ระบุช่องทาง))",
 )
 
 # Matches ReaderModal.tsx splitSectionTitleAndBody(): colonIdx > 2 && colonIdx <= 46
@@ -354,49 +383,51 @@ Calibrate `importance_score` (integer 1–10) strictly so rankings reflect real 
 <deep_5d_editorial_rubric>
 Every item in `summary_bullets` MUST be an exhaustive, self-contained deep-dive section—target **4 to 6 information-dense, cohesive Thai sentences (~450–900 Thai characters) per section** whenever Stage 1 provides sufficient facts (never pad with vague repetition if a source is genuinely brief; explain every real technical, comparative, and practical detail thoroughly).
 
-Follow this mandatory Sub-Topic Depth Checklist for each of the 5 sections:
+STRICT ANTI-FILLER & CATEGORY-ADAPTIVE SECTION RULE:
+- Produce **3 to 5 substantive sections** per story (target 5 when all dimensions have real facts; OMIT any optional section whose dimension genuinely does not apply to the story).
+- NEVER write robotic boilerplate explaining why a section does not apply (e.g., NEVER write "เรื่องนี้ไม่ใช่การเปิดตัวสินค้าจึงไม่มีช่องทางเข้าถึงหรือไลเซนส์" or "ข่าวนี้ไม่มีข้อมูลด้านสเปกเทคนิค"). Omit that heading cleanly instead.
+- Match section prefixes to the story's `category` so policy, deal, supply-chain, and research briefs read like authentic human-edited journalism:
 
-=== FOR `status == "verified"` ===
-1. `ที่มาและบริบท: `
-   - Identify the exact actor, product/paper/policy name, announcement context, and lineage (what earlier version or status quo this updates).
-   - Explain the concrete engineering, economic, or regulatory bottleneck that previously held teams back and why this development matters now.
-   - Connect to broader industry dynamics or prior published context (if following up on an earlier story or confirming a prior rumor, state explicitly what newly changed).
+=== FOR `status == "verified"` — Choose the prefix set matching `category` ===
+A. `category == "models_updates"`:
+   1. `ที่มาและบริบท: ` — Actor, product/model lineage, concrete bottleneck solved, and why it matters now.
+   2. `เจาะลึกสเปกและกลไกเทคนิค: ` — Step-by-step under-the-hood architecture, API/SDK behavior, quantization/runtime mechanics.
+   3. `ตัวเลขและผลเปรียบเทียบ: ` — Exact benchmark scores, pricing deltas, latency/TTFT/throughput gains, before-vs-after comparisons (omit only if zero quantitative metrics exist).
+   4. `การเข้าถึงและเงื่อนไขการใช้งาน: ` — Exact channels (API, cloud partners, GitHub, Hugging Face), GA/Preview status, licensing, hardware/migration prerequisites (omit if not a product/code rollout).
+   5. `ผลกระทบและข้อสังเกตที่ควรรู้: ` — Stakeholder impact, limitations, trade-offs, caveats, and what signal to monitor next.
 
-2. `เจาะลึกสเปกและกลไกเทคนิค: `
-   - Unpack the under-the-hood mechanism step-by-step (Cause -> Technical Mechanism -> Concrete Effect), NOT just surface-level marketing labels.
-   - Detail exact architecture components, parameter counts, context windows, API/SDK behavior, quantization/kernel mechanics, sandbox runtimes, cryptographic standards, or legal clauses present in Stage 1.
-   - Briefly clarify advanced technical terms in natural Thai context so both AI engineers and technical decision-makers grasp *how* and *why* it works.
+B. `category == "benchmarks_testing"`:
+   1. `ที่มาและโจทย์วิจัย: ` — Authors/lab, problem statement, and prior research limitations addressed.
+   2. `ระเบียบวิธีและกลไกหลัก: ` — Core algorithm, training/evaluation methodology, experimental design.
+   3. `ผลทดสอบและตัวเลขเปรียบเทียบ: ` — Exact benchmark datasets, scores, ablation results, baseline comparisons.
+   4. `การเปิดเผยโค้ดและข้อจำกัดการทดลอง: ` — Open weights/code/dataset availability, hardware conditions, reproducibility caveats (omit if undisclosed).
+   5. `ผลกระทบและข้อสังเกตที่ควรรู้: ` — Implications for engineers/researchers, key limitations, and next steps.
 
-3. `ตัวเลขและผลเปรียบเทียบ: `
-   - Report ALL key quantitative metrics from Stage 1 without dropping secondary numbers: exact benchmark scores with dataset names & test conditions, cost/pricing deltas, latency/TTFT/throughput speedups, VRAM/power/deal magnitudes.
-   - Explicitly frame comparisons (Before vs. After, vs. previous generation, vs. baseline/Full Attention/closed models) strictly as stated in the source.
-   - Missing-Metric Protocol: If the story is a policy/partnership with no technical benchmarks, systematically break down all disclosed quantitative scope (effective dates, covered tiers/regions, deal duration, capacities, compliance thresholds) and state clearly if technical benchmarks were not disclosed.
+C. `category == "partnerships_deals"`:
+   1. `ที่มาและบริบทดีล: ` — Companies/investors involved, strategic motivation, and market/supply-chain backdrop.
+   2. `รายละเอียดข้อตกลงและขอบเขต: ` — Concrete scope of partnership, hardware/compute/supply-chain terms, geographic or product coverage.
+   3. `มูลค่า ตัวเลข และไทม์ไลน์: ` — Disclosed deal values, capacities (MW/GW/GPUs), valuation, dates, or rollout schedules (omit if zero figures/dates disclosed).
+   4. `โครงสร้างการดำเนินงานและคู่สัญญา: ` — Governance, cloud/supply partners, commercial exclusivity, or operational dependencies (omit if undisclosed).
+   5. `ผลกระทบต่อตลาดและข้อสังเกตที่ควรรู้: ` — Competitive impact, regional/industry ripple effects, execution risks, and unanswered questions.
 
-4. `การเข้าถึงและเงื่อนไขการใช้งาน: `
-   - Specify exact distribution channels (direct API, cloud partners like AWS/Vertex/Azure, GitHub, Hugging Face, Web/CLI), rollout status (GA, Preview, staged dates), and supported model tiers.
-   - Detail pricing structure, licensing terms (MIT, Apache 2.0, proprietary API terms, ToS scope), hardware/runtime prerequisites, and compatibility with existing workflows or tools (e.g., vLLM, SGLang, Extended Thinking, zero-code-change migration).
-   - Note practical adoption requirements or constraints teams should check before deploying.
-
-5. `ผลกระทบและข้อสังเกตที่ควรรู้: `
-   - Analyze concrete implications across relevant stakeholders (AI/software engineers, enterprises/startups, open-source community, and competitive positioning among AI labs).
-   - Surface every stated limitation, trade-off, hardware dependency, edge case, privacy/security/copyright risk, or operational caveat honestly.
-   - Highlight what technical or market signal to monitor next, staying strictly anchored to the source facts.
+D. `category == "policy_rules"`:
+   1. `ที่มาและบริบทนโยบาย: ` — Regulator, government, company, or court driving the move and the triggering controversy/risk.
+   2. `สาระสำคัญและขอบเขตการบังคับใช้: ` — Concrete rules, export controls, copyright/safety mandates, or ToS provisions and affected parties/regions.
+   3. `ไทม์ไลน์ กลุ่มเป้าหมาย และตัวเลขสำคัญ: ` — Effective dates, enforcement thresholds, penalties, covered countries/tiers, or affected volume (omit if none disclosed).
+   4. `ท่าทีผู้เกี่ยวข้องและช่องทางปฏิบัติตาม: ` — Official responses from companies/regulators, compliance paths, or legal appeals (omit if undisclosed).
+   5. `ผลกระทบต่ออุตสาหกรรมและข้อสังเกตที่ควรรู้: ` — Practical impact on developers, enterprises, Thailand/regional ecosystem, and remaining uncertainties.
 
 === FOR `status == "rumor"` ===
 1. `จุดเริ่มต้นของเบาะแส: `
-   - Trace exactly where and how the clue surfaced (specific Hacker News / Lobste.rs / Reddit thread, flair, GitHub commit/diff, network header, A/B test interface), who noticed it, and community engagement/timeline (including whether the artifact was later deleted or made private).
-
+   - Trace exactly where and how the clue surfaced (specific Hacker News / Lobste.rs / Reddit / press report), who noticed it, and community engagement/timeline.
 2. `รายละเอียดสเปกที่หลุดออกมา: `
-   - Unpack every technical clue found in the leak (codenames, class/config names, MoE routing specs, quantization formats, claimed speed/reasoning behavior) and explain what those technical specifications imply architecturally, using strict epistemic hedging (`คาดว่า`, `อ้างว่า`, `ตามข้อมูลที่หลุด`).
-
+   - Unpack every concrete technical or strategic clue found in the report using strict epistemic hedging (`คาดว่า`, `อ้างว่า`, `ตามข้อมูลที่หลุด`).
 3. `หลักฐานและบริบทแวดล้อม: `
-   - Evaluate the exact type of evidence (code diff vs. screenshot vs. user anecdote), cross-report consistency across accounts, and how it fits or diverges from the company's historical pre-release patterns or open-source ecosystem timelines.
-
+   - Evaluate the exact type of evidence (code diff vs. screenshot vs. anonymous sources), cross-report consistency, and industry context.
 4. `ผลกระทบที่คาดการณ์: `
-   - Explain concretely—framed explicitly as conditional ("หากข่าวลือนี้เป็นจริง...")—how this would shift VRAM/hardware requirements, API latency/cost economics, or developer workflows compared to current offerings.
-
+   - Explain concretely—framed explicitly as conditional ("หากข่าวลือนี้เป็นจริง...")—how this would affect hardware, supply chain, API economics, or developer workflows.
 5. `ระดับความน่าเชื่อถือและข้อควรระวัง: `
-   - Give a candid reliability assessment (strength of artifacts vs. spoofing/misinterpretation risk), explicitly affirm that the company has issued NO official confirmation, and outline plausible alternative explanations (e.g., internal experiment that may never ship publicly).
+   - Give a candid reliability assessment, explicitly affirm that the company/regulator has issued NO official confirmation, and outline plausible alternative explanations.
 </deep_5d_editorial_rubric>
 
 <thai_editorial_and_ui_contract>
@@ -410,30 +441,20 @@ Follow these strict Thai writing and UI-rendering rules:
    - Use ASCII double quotes `"..."` selectively for codenames or named technical concepts where helpful.
    - Keep standard English technical terms untranslated when Thai engineers expect them (e.g., Prompt Caching, KV Cache, Structured Outputs, MoE, Open-Weight, SWE-bench Verified, API, Fine-Tuning, Triton Kernels), weaving crisp Thai explanations around them so the prose reads like native, authoritative Thai tech analysis—never stiff machine translation.
    - Tone: Authoritative, deeply analytical, objective Thai tech journalism. Zero hype, zero emoji, zero clickbait punctuation (`!`, `?!`).
-   - Epistemic Discipline for Rumors: ALWAYS use cautious Thai attribution (`คาดว่า`, `อ้างว่า`, `มีรายงานเบาะแสจากคอมมูนิตี้`, `ยังไม่ยืนยันอย่างเป็นทางการ`). NEVER state rumor specs as confirmed fact.
+   - Calendar Year Consistency: ALWAYS write calendar years in Common Era (ค.ศ., e.g. `26 พฤศจิกายน 2026`), NEVER Buddhist Era (`2569`), matching the frontend calendar system.
+   - Attribution & Epistemic Discipline: For press-only clusters (where all `source_urls` have `is_official: false`), NEVER claim official company confirmation unless explicitly quoted in the source—attribute clearly (`ตามรายงานของ TechCrunch...`, `อ้างแหล่งข่าวที่เกี่ยวข้อง...`). For `status == "rumor"`, ALWAYS use cautious Thai attribution (`คาดว่า`, `อ้างว่า`, `มีรายงานเบาะแส`, `ยังไม่ยืนยันอย่างเป็นทางการ`).
 
 3. FIELD-BY-FIELD CONSTRAINTS:
-   - `title_th` (15–220 chars, target 70–145 chars): Crisp, authoritative Thai headline naming the actor, core technical breakthrough, and concrete quantitative impact. Do NOT prepend `[ข่าวลือ]` to rumor headlines (the UI renders its own Rumor Radar badge).
+   - `title_th` (15–220 chars, target 70–145 chars): Crisp, authoritative Thai headline naming the actor, core development, and concrete quantitative impact. Do NOT prepend `[ข่าวลือ]` or `[ลือ]` to headlines (the UI renders its own status badge).
    - `tldr_th` (40–420 chars, target 220–360 chars): 2 information-dense Thai sentences for preview cards and reader standfirst. Front-load the #1 fact, mechanism, and headline number in sentence 1, and practical impact/rollout in sentence 2. For rumors, end with `(ยังไม่ยืนยันทางการ)`.
    - `key_facts` (prefer EXACTLY 4 objects `{label, value}`; 3 minimum):
      * `label`: Short Thai metric label (<= 26 chars ideal, max 60 chars) so it never clips on cards.
      * `value`: Dense, concrete spec/comparison (<= 44 chars ideal, max 90 chars).
      * Order the 3 highest-impact metrics FIRST (Featured cards preview the first 3).
      * For `status == "rumor"`, the 4th item MUST be: `{"label": "สถานะการยืนยัน", "value": "ข่าวลือ — ยังไม่ยืนยันทางการ"}`.
-   - `summary_bullets` (EXACTLY 5 strings, following `<deep_5d_editorial_rubric>`):
-     * Every string MUST start with its EXACT required Thai prefix followed by `: ` (colon + space). Do NOT alter, shorten, or translate these prefixes.
-     * For `status == "verified"`:
-       1. `ที่มาและบริบท: `
-       2. `เจาะลึกสเปกและกลไกเทคนิค: `
-       3. `ตัวเลขและผลเปรียบเทียบ: `
-       4. `การเข้าถึงและเงื่อนไขการใช้งาน: `
-       5. `ผลกระทบและข้อสังเกตที่ควรรู้: `
-     * For `status == "rumor"`:
-       1. `จุดเริ่มต้นของเบาะแส: `
-       2. `รายละเอียดสเปกที่หลุดออกมา: `
-       3. `หลักฐานและบริบทแวดล้อม: `
-       4. `ผลกระทบที่คาดการณ์: `
-       5. `ระดับความน่าเชื่อถือและข้อควรระวัง: `
+   - `summary_bullets` (3 to 5 strings, following `<deep_5d_editorial_rubric>`):
+     * Every string MUST start with its exact category-matched Thai prefix followed by `: ` (colon + space) in order.
+     * OMIT any optional section whose dimension genuinely does not apply to the story instead of writing N/A filler sentences.
 </thai_editorial_and_ui_contract>
 
 <thinking_protocol>
@@ -441,9 +462,9 @@ Use your Adaptive/Extended Thinking systematically in 6 tight passes before emit
 1. Cross-Chunk Merge & Cross-Day Dedup: Merge overlapping Stage 1 clusters (combining all complementary facts) and filter out items already covered in <prior_published_topics> unless a material new update exists.
 2. Curation & 3-Way Rumor-vs-Verified Deconfliction: Filter out low-signal noise; cap rumors at 0–3 highest-signal items; drop any rumor superseded by a verified item (in this batch OR already in <prior_published_topics>); collect exact `cluster_slug` values of prior `status=="rumor"` items now officially confirmed by today's verified items into `superseded_rumor_slugs`.
 3. Categorization & Tag Audit: Apply <category_rubric> tie-breakers for verified items; confirm `category: null` for every rumor; verify `company_tags` against the 8-value enum.
-4. Depth & Grounding Plan: For each kept story, map EVERY Stage 1 fact into its exact slot across the 5 sections so zero important technical details, benchmarks, pricing figures, licenses, or caveats get dropped—and confirm zero facts come from outside <stage1_clusters>.
+4. Depth & Grounding Plan: For each kept story, map EVERY Stage 1 fact into its category-matched sections (3–5 sections; zero N/A filler) so zero important details get dropped—and confirm zero facts come from outside <stage1_clusters>.
 5. Importance Calibration: Rank items so only 1–2 flagship items score 9–10.
-6. Final Schema & UI Check: Verify unique `cluster_slug`, exact 5 required Thai prefixes with `: `, 4 rich `key_facts` (min 3), deep 4–6 sentence prose per section without fluff, zero Markdown tokens (`**`, `` ` ``), verbatim URLs/`image_url`, and valid JSON syntax.
+6. Final Schema & UI Check: Verify unique `cluster_slug`, category-matched Thai prefixes with `: `, Common Era (ค.ศ.) dates only, 4 rich `key_facts` (min 3), deep prose without fluff or Markdown tokens (`**`, `` ` ``), verbatim URLs/`image_url`, and valid JSON syntax.
 </thinking_protocol>
 
 <output_contract>
@@ -874,16 +895,23 @@ def audit_stage2_output(
         if item.image_url is not None and item.image_url not in allowed_images:
             errors.append(f"{ctx} fabricated or altered image_url: {item.image_url}")
 
-        # Exact 5-dimension Thai section prefix, ReaderModal colonIdx & depth check
-        expected_prefixes = (
-            VERIFIED_SECTION_PREFIXES if item.status == "verified" else RUMOR_SECTION_PREFIXES
-        )
-        for b_idx, (bullet, expected_prefix) in enumerate(
-            zip(item.summary_bullets, expected_prefixes)
-        ):
-            if not bullet.startswith(expected_prefix):
+        # Category-adaptive Thai section prefix, ReaderModal colonIdx, filler & depth check
+        if item.status == "verified":
+            cat_prefixes = VERIFIED_CATEGORY_SECTION_PREFIXES.get(
+                item.category or "models_updates", VERIFIED_SECTION_PREFIXES
+            )
+            allowed_prefixes = set(cat_prefixes) | set(VERIFIED_SECTION_PREFIXES)
+        else:
+            allowed_prefixes = set(RUMOR_SECTION_PREFIXES)
+
+        for b_idx, bullet in enumerate(item.summary_bullets):
+            matched_prefix = next(
+                (p for p in allowed_prefixes if bullet.startswith(p)), None
+            )
+            if not matched_prefix:
                 errors.append(
-                    f"{ctx} summary_bullets[{b_idx}] must start with '{expected_prefix}'"
+                    f"{ctx} summary_bullets[{b_idx}] does not start with an allowed Thai section prefix for "
+                    f"status='{item.status}' category='{item.category}'"
                 )
             colon_idx = bullet.find(":")
             if not (READER_MODAL_MIN_COLON_INDEX <= colon_idx <= READER_MODAL_MAX_COLON_INDEX):
@@ -891,11 +919,17 @@ def audit_stage2_output(
                     f"{ctx} summary_bullets[{b_idx}] colon index {colon_idx} outside "
                     f"ReaderModal safe range [{READER_MODAL_MIN_COLON_INDEX}..{READER_MODAL_MAX_COLON_INDEX}]"
                 )
-            elif len(bullet[colon_idx + 1 :].strip()) < MIN_DEEP_SECTION_BODY_CHARS:
-                warnings.append(
-                    f"{ctx} summary_bullets[{b_idx}] body is shorter than "
-                    f"{MIN_DEEP_SECTION_BODY_CHARS} chars (check if source allowed deeper analysis)"
-                )
+            else:
+                body_text = bullet[colon_idx + 1 :].strip()
+                if len(body_text) < MIN_DEEP_SECTION_BODY_CHARS:
+                    warnings.append(
+                        f"{ctx} summary_bullets[{b_idx}] body is shorter than "
+                        f"{MIN_DEEP_SECTION_BODY_CHARS} chars (check if source allowed deeper analysis)"
+                    )
+                if _TEMPLATE_FILLER_RE.search(body_text):
+                    warnings.append(
+                        f"{ctx} summary_bullets[{b_idx}] contains N/A template filler; omit inapplicable section instead"
+                    )
 
         # Markdown leakage check across all rendered Thai prose fields
         fields_to_scan: List[Tuple[str, str]] = [

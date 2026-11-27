@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Bookmark,
   ArrowRight,
+  Newspaper,
 } from 'lucide-react';
 import {
   NewsItem,
@@ -11,6 +12,11 @@ import {
   VerifiedCategory,
 } from '../types/news';
 import { getSafeImageUrl } from '../lib/urlSafety';
+import {
+  formatSourceSummary,
+  formatThaiDateCE,
+  getNewsTrustInfo,
+} from '../lib/editorialUtils';
 import { RichThaiText } from './RichThaiText';
 
 export type FontScale = 'normal' | 'large' | 'xlarge';
@@ -46,22 +52,25 @@ const FEATURED_HEADLINE_SCALE: Record<FontScale, string> = {
 
 const TEASER_SCALE: Record<FontScale, string> = {
   normal: 'text-[14px] leading-[1.78]',
-  large: 'text-[15px] leading-[1.82]',
-  xlarge: 'text-[16px] leading-[1.85]',
+  large: 'text-[15.5px] leading-[1.82]',
+  xlarge: 'text-[17px] leading-[1.85]',
+};
+
+// Relax / remove line-clamp when user enlarges font scale so text never clips mid-word
+const FEATURED_CLAMP: Record<FontScale, string> = {
+  normal: 'line-clamp-3',
+  large: 'line-clamp-4',
+  xlarge: 'line-clamp-none',
+};
+
+const COMPACT_CLAMP: Record<FontScale, string> = {
+  normal: 'line-clamp-2',
+  large: 'line-clamp-3',
+  xlarge: 'line-clamp-none',
 };
 
 export function formatThaiDate(isoString: string): string {
-  try {
-    const d = new Date(isoString);
-    return new Intl.DateTimeFormat('th-TH', {
-      timeZone: 'Asia/Bangkok',
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    }).format(d);
-  } catch {
-    return isoString;
-  }
+  return formatThaiDateCE(isoString);
 }
 
 export const NewsCard: React.FC<NewsCardProps> = ({
@@ -90,10 +99,10 @@ export const NewsCard: React.FC<NewsCardProps> = ({
       : VERIFIED_CATEGORIES[0].titleTh;
 
   const teaserText = item.tldr_th || item.summary_bullets[0] || '';
-  const primarySource =
-    item.source_urls.find((s) => s.is_official) ?? item.source_urls[0];
-  const extraSourcesCount = Math.max(0, item.source_urls.length - 1);
-  const companyLabel = item.company_tags.length > 0 ? item.company_tags.join(' / ') : '';
+  const sourceSummary = formatSourceSummary(item.source_urls);
+  const trustInfo = getNewsTrustInfo(item);
+  const companyLabel =
+    item.company_tags.length > 0 ? item.company_tags.join(' / ') : '';
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.target !== e.currentTarget) return;
@@ -101,6 +110,41 @@ export const NewsCard: React.FC<NewsCardProps> = ({
       e.preventDefault();
       onOpenReader(item);
     }
+  };
+
+  const renderTrustBadge = () => {
+    if (isRumor) return null;
+    if (trustInfo.tier === 'official') {
+      return (
+        <span
+          title={trustInfo.tooltip}
+          className="inline-flex items-center gap-1 text-[10px] font-semibold text-verified"
+        >
+          <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+          <span className="hidden sm:inline">{trustInfo.shortLabel}</span>
+        </span>
+      );
+    }
+    if (trustInfo.tier === 'press_unconfirmed') {
+      return (
+        <span
+          title={trustInfo.tooltip}
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rumor-soft text-rumor text-[10px] font-semibold"
+        >
+          <AlertTriangle className="w-3 h-3 shrink-0" />
+          <span>{trustInfo.shortLabel}</span>
+        </span>
+      );
+    }
+    return (
+      <span
+        title={trustInfo.tooltip}
+        className="inline-flex items-center gap-1 text-[10px] font-medium text-ink-muted"
+      >
+        <Newspaper className="w-3.5 h-3.5 shrink-0" />
+        <span className="hidden sm:inline">{trustInfo.shortLabel}</span>
+      </span>
+    );
   };
 
   // =========================================================================
@@ -113,7 +157,7 @@ export const NewsCard: React.FC<NewsCardProps> = ({
         tabIndex={0}
         onClick={() => onOpenReader(item)}
         onKeyDown={handleKeyDown}
-        className="group relative rounded-lg text-left cursor-pointer bg-surface border border-rule border-t-2 border-t-editorial hover:border-rule-strong hover:shadow-sm transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-editorial/50 p-6 sm:p-7"
+        className="group relative rounded-lg text-left cursor-pointer bg-surface border border-rule border-t-2 border-t-editorial hover:border-rule-strong hover:shadow-sm transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-editorial/50 p-5 sm:p-7"
       >
         <div
           className={`grid grid-cols-1 gap-6 items-center ${
@@ -150,12 +194,7 @@ export const NewsCard: React.FC<NewsCardProps> = ({
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <span
-                    title="แหล่งข่าวทางการยืนยันแล้ว"
-                    className="inline-flex items-center text-verified"
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                  </span>
+                  {renderTrustBadge()}
                   <button
                     type="button"
                     onClick={(e) => {
@@ -164,16 +203,24 @@ export const NewsCard: React.FC<NewsCardProps> = ({
                     }}
                     onKeyDown={(e) => e.stopPropagation()}
                     aria-pressed={isBookmarked}
-                    aria-label={isBookmarked ? 'นำออกจากที่บันทึกไว้' : 'บันทึกข่าวนี้'}
-                    title={isBookmarked ? 'นำออกจากที่บันทึกไว้' : 'บันทึกไว้อ่านภายหลัง'}
-                    className={`p-2 -m-1 rounded transition-colors ${
+                    aria-label={
+                      isBookmarked ? 'นำออกจากที่บันทึกไว้' : 'บันทึกข่าวนี้'
+                    }
+                    title={
+                      isBookmarked
+                        ? 'นำออกจากที่บันทึกไว้'
+                        : 'บันทึกไว้อ่านภายหลัง'
+                    }
+                    className={`inline-flex items-center justify-center min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2 -m-2 sm:-m-1 rounded transition-colors ${
                       isBookmarked
                         ? 'text-editorial'
                         : 'text-ink-muted hover:text-ink-primary'
                     }`}
                   >
                     <Bookmark
-                      className={`w-3.5 h-3.5 ${isBookmarked ? 'fill-current' : ''}`}
+                      className={`w-4 h-4 sm:w-3.5 sm:h-3.5 ${
+                        isBookmarked ? 'fill-current' : ''
+                      }`}
                     />
                   </button>
                 </div>
@@ -186,20 +233,32 @@ export const NewsCard: React.FC<NewsCardProps> = ({
               </h3>
 
               <p
-                className={`thai-prose break-words text-ink-secondary line-clamp-3 mb-4 ${TEASER_SCALE[fontScale]}`}
+                className={`thai-prose break-words text-ink-secondary mb-4 ${FEATURED_CLAMP[fontScale]} ${TEASER_SCALE[fontScale]}`}
               >
                 {teaserText}
               </p>
 
-              {/* Inline Key Facts Preview (Top 2 metrics quietly displayed) */}
+              {/* Inline Key Facts Preview (Top 3 metrics — wraps cleanly at large font scales) */}
               {item.key_facts && item.key_facts.length > 0 && (
-                <div className="flex flex-wrap gap-x-5 gap-y-2 py-3 mb-4 border-y border-rule/80">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-5 gap-y-2.5 py-3 mb-4 border-y border-rule/80">
                   {item.key_facts.slice(0, 3).map((fact, idx) => (
                     <div key={idx} className="min-w-0">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
+                      <div
+                        className={`font-semibold tracking-wide text-ink-muted break-words ${
+                          fontScale === 'xlarge' ? 'text-xs' : 'text-[10.5px]'
+                        }`}
+                      >
                         {fact.label}
                       </div>
-                      <div className="text-xs font-bold text-ink-primary">
+                      <div
+                        className={`font-bold text-ink-primary break-words leading-snug ${
+                          fontScale === 'xlarge'
+                            ? 'text-sm'
+                            : fontScale === 'large'
+                            ? 'text-[13px]'
+                            : 'text-xs'
+                        }`}
+                      >
                         {fact.value}
                       </div>
                     </div>
@@ -208,21 +267,33 @@ export const NewsCard: React.FC<NewsCardProps> = ({
               )}
             </div>
 
-            <div className="flex items-center justify-between gap-3 text-[11px] text-ink-muted">
-              <div className="flex items-center gap-1.5 min-w-0 truncate">
-                {primarySource && (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-ink-muted">
+              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0">
+                {sourceSummary && (
                   <>
-                    <span className="font-medium text-ink-secondary truncate">
-                      {primarySource.title}
-                      {extraSourcesCount > 0 ? ` +${extraSourcesCount}` : ''}
+                    <span
+                      title={sourceSummary.primaryFullTitle}
+                      className="font-medium text-ink-secondary"
+                    >
+                      {sourceSummary.primaryName}
                     </span>
+                    {sourceSummary.countLabel && (
+                      <>
+                        <span aria-hidden="true" className="text-rule-strong">
+                          ·
+                        </span>
+                        <span className="text-ink-muted">
+                          {sourceSummary.countLabel}
+                        </span>
+                      </>
+                    )}
                     <span aria-hidden="true" className="text-rule-strong">
                       ·
                     </span>
                   </>
                 )}
                 <span className="shrink-0">
-                  {formatThaiDate(item.published_at)}
+                  {formatThaiDateCE(item.published_at)}
                 </span>
               </div>
 
@@ -310,7 +381,9 @@ export const NewsCard: React.FC<NewsCardProps> = ({
                   <span>Rumor Radar</span>
                 </span>
               ) : (
-                <span className="font-bold text-editorial">{categoryLabel}</span>
+                <span className="font-bold text-editorial">
+                  {categoryLabel}
+                </span>
               )}
 
               {companyLabel && (
@@ -318,7 +391,7 @@ export const NewsCard: React.FC<NewsCardProps> = ({
                   <span aria-hidden="true" className="text-rule-strong">
                     ·
                   </span>
-                  <span className="font-semibold text-ink-secondary truncate">
+                  <span className="font-semibold text-ink-secondary break-words">
                     {companyLabel}
                   </span>
                 </>
@@ -326,14 +399,7 @@ export const NewsCard: React.FC<NewsCardProps> = ({
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
-              {!isRumor && (
-                <span
-                  title="แหล่งข่าวทางการยืนยันแล้ว"
-                  className="inline-flex items-center text-verified"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                </span>
-              )}
+              {renderTrustBadge()}
               <button
                 type="button"
                 onClick={(e) => {
@@ -342,16 +408,24 @@ export const NewsCard: React.FC<NewsCardProps> = ({
                 }}
                 onKeyDown={(e) => e.stopPropagation()}
                 aria-pressed={isBookmarked}
-                aria-label={isBookmarked ? 'นำออกจากที่บันทึกไว้' : 'บันทึกข่าวนี้'}
-                title={isBookmarked ? 'นำออกจากที่บันทึกไว้' : 'บันทึกไว้อ่านภายหลัง'}
-                className={`p-2 -m-1 rounded transition-colors ${
+                aria-label={
+                  isBookmarked ? 'นำออกจากที่บันทึกไว้' : 'บันทึกข่าวนี้'
+                }
+                title={
+                  isBookmarked
+                    ? 'นำออกจากที่บันทึกไว้'
+                    : 'บันทึกไว้อ่านภายหลัง'
+                }
+                className={`inline-flex items-center justify-center min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2 -m-2 sm:-m-1 rounded transition-colors ${
                   isBookmarked
                     ? 'text-editorial'
                     : 'text-ink-muted hover:text-ink-primary'
                 }`}
               >
                 <Bookmark
-                  className={`w-3.5 h-3.5 ${isBookmarked ? 'fill-current' : ''}`}
+                  className={`w-4 h-4 sm:w-3.5 sm:h-3.5 ${
+                    isBookmarked ? 'fill-current' : ''
+                  }`}
                 />
               </button>
             </div>
@@ -364,30 +438,42 @@ export const NewsCard: React.FC<NewsCardProps> = ({
             <RichThaiText text={item.title_th} variant="headline" />
           </h3>
 
-          {/* Executive TL;DR Preview */}
+          {/* Executive TL;DR Preview (unclamped on xlarge so text never clips) */}
           <p
-            className={`thai-prose break-words text-ink-secondary line-clamp-2 ${TEASER_SCALE[fontScale]}`}
+            className={`thai-prose break-words text-ink-secondary ${COMPACT_CLAMP[fontScale]} ${TEASER_SCALE[fontScale]}`}
           >
             {teaserText}
           </p>
         </div>
       </div>
 
-      {/* Quiet Authoritative Footer */}
-      <div className="px-5 py-3 border-t border-rule/80 flex items-center justify-between gap-3 text-[11px] text-ink-muted">
-        <div className="flex items-center gap-1.5 min-w-0 truncate">
-          {primarySource && (
+      {/* Quiet Authoritative Footer (Clean source name, wraps naturally if needed) */}
+      <div className="px-5 py-3 border-t border-rule/80 flex flex-wrap items-center justify-between gap-2 text-[11px] text-ink-muted">
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0">
+          {sourceSummary && (
             <>
-              <span className="font-medium text-ink-secondary truncate">
-                {primarySource.title}
-                {extraSourcesCount > 0 ? ` +${extraSourcesCount}` : ''}
+              <span
+                title={sourceSummary.primaryFullTitle}
+                className="font-medium text-ink-secondary"
+              >
+                {sourceSummary.primaryName}
               </span>
+              {sourceSummary.countLabel && (
+                <>
+                  <span aria-hidden="true" className="text-rule-strong">
+                    ·
+                  </span>
+                  <span className="text-ink-muted">
+                    {sourceSummary.countLabel}
+                  </span>
+                </>
+              )}
               <span aria-hidden="true" className="text-rule-strong">
                 ·
               </span>
             </>
           )}
-          <span className="shrink-0">{formatThaiDate(item.published_at)}</span>
+          <span className="shrink-0">{formatThaiDateCE(item.published_at)}</span>
         </div>
 
         <span

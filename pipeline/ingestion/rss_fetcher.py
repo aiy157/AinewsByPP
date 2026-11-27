@@ -33,6 +33,19 @@ from pipeline.sources import RssSource, VERIFIED_RSS_SOURCES
 
 logger = logging.getLogger(__name__)
 
+# Press articles explicitly flagged as unconfirmed rumors/leaks (e.g. Blognone "[ลือ]")
+# must be routed to status='rumor' instead of verified facts.
+_PRESS_RUMOR_TITLE_RE = re.compile(
+    r"^\s*(?:\[(?:ลือ|ข่าวลือ|rumor|leak)\]|(?:rumor|leak)\s*:)",
+    re.IGNORECASE,
+)
+
+
+def classify_rss_item_status(title: str, is_official: bool) -> str:
+    if not is_official and _PRESS_RUMOR_TITLE_RE.match(title or ""):
+        return "rumor"
+    return "verified"
+
 
 def _clean_html_to_text(raw_html: str, max_chars: int = 3500) -> str:
     if not raw_html:
@@ -127,10 +140,11 @@ def _fetch_single_rss_source(
             image_url = extract_image_from_rss_entry(entry, base_url=link)
             published_ict = published_utc.astimezone(ICT_TZ)
 
+            item_status = classify_rss_item_status(title, source.is_official)
             items.append(
                 RawScrapedItem(
-                    raw_id=_hash_id(f"verified|{link}"),
-                    status="verified",
+                    raw_id=_hash_id(f"{item_status}|{link}"),
+                    status=item_status,
                     source_name=source.name,
                     is_official_source=source.is_official,
                     default_company_tag=source.default_company_tag,

@@ -89,8 +89,13 @@ def prepare_ingestion_streams(
     max_verified: int = 125,
     max_rumor: int = 25,
 ) -> Tuple[List[RawScrapedItem], List[RawScrapedItem]]:
-    clean_verified = deduplicate_stream(verified_items)[:max_verified]
-    clean_rumor = deduplicate_stream(rumor_items)[:max_rumor]
+    # Enforce strict status isolation even if press RSS feeds routed explicit '[ลือ]' items as status='rumor'
+    routed_verified = [i for i in verified_items if i.status == "verified"]
+    press_rumors = [i for i in verified_items if i.status == "rumor"]
+    combined_rumors = press_rumors + [i for i in rumor_items if i.status == "rumor"]
+
+    clean_verified = deduplicate_stream(routed_verified)[:max_verified]
+    clean_rumor = deduplicate_stream(combined_rumors)[:max_rumor]
 
     logger.info(
         "Deduplicated streams ready -> verified=%d (cap %d), rumor=%d (cap %d), total=%d",
