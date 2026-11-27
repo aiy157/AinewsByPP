@@ -133,8 +133,9 @@ export const NewsCard: React.FC<NewsCardProps> = ({
     if (trustInfo.tier === 'official') {
       return (
         <span
+          data-trust-tier="official"
           title={trustInfo.tooltip}
-          className="inline-flex items-center gap-1 text-[10px] font-semibold text-verified"
+          className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-verified"
         >
           <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
           <span className="hidden sm:inline">{trustInfo.shortLabel}</span>
@@ -144,19 +145,22 @@ export const NewsCard: React.FC<NewsCardProps> = ({
     if (trustInfo.tier === 'preprint') {
       return (
         <span
+          data-trust-tier="preprint"
           title={trustInfo.tooltip}
-          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-editorial-soft text-editorial text-[10px] font-semibold"
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-editorial/25 bg-editorial-soft text-editorial text-[10.5px] font-semibold whitespace-nowrap"
         >
           <BookOpen className="w-3 h-3 shrink-0" />
-          <span>{trustInfo.shortLabel}</span>
+          <span className="sm:hidden">พรีปรินต์ ArXiv</span>
+          <span className="hidden sm:inline">{trustInfo.shortLabel}</span>
         </span>
       );
     }
     if (trustInfo.tier === 'press_unconfirmed') {
       return (
         <span
+          data-trust-tier="press_unconfirmed"
           title={trustInfo.tooltip}
-          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rumor-soft text-rumor text-[10px] font-semibold"
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-rumor/25 bg-rumor-soft text-rumor text-[10.5px] font-semibold whitespace-nowrap"
         >
           <AlertTriangle className="w-3 h-3 shrink-0" />
           <span>{trustInfo.shortLabel}</span>
@@ -165,8 +169,9 @@ export const NewsCard: React.FC<NewsCardProps> = ({
     }
     return (
       <span
+        data-trust-tier={trustInfo.tier}
         title={trustInfo.tooltip}
-        className="inline-flex items-center gap-1 text-[10px] font-medium text-ink-muted"
+        className="inline-flex items-center gap-1 text-[10.5px] font-medium text-ink-muted"
       >
         <Newspaper className="w-3.5 h-3.5 shrink-0" />
         <span className="hidden sm:inline">{trustInfo.shortLabel}</span>

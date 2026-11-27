@@ -772,6 +772,15 @@ export const App: React.FC = () => {
         onSelectTab={handleSelectTab}
         counts={tabCounts}
         loading={loading}
+        countScopeNote={
+          showOnlyBookmarked
+            ? 'ยอดในรายการที่บันทึกไว้'
+            : isSearchActive || selectedCompany !== 'ALL'
+            ? 'ยอดตามตัวกรองปัจจุบัน'
+            : viewMode === 'daily'
+            ? 'ยอดทั้งฉบับรายวัน'
+            : 'ยอดทั้งสัปดาห์'
+        }
       />
 
       {/* Main Content Container */}

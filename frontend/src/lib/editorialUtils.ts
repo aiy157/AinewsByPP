@@ -147,6 +147,23 @@ export interface TrustBadgeInfo {
 const PRESS_RUMOR_TITLE_RE = /^\s*\[(?:ลือ|ข่าวลือ|rumor|leak)\]/i;
 const ANONYMOUS_RUMOR_BODY_RE =
   /(?:แหล่งข่าว(?:นิรนาม|ไม่เปิดเผยชื่อ|วงใน)|ยังไม่(?:มี|ได้รับ)คำยืนยัน(?:อย่างเป็นทางการ|ทางการ)|ข่าวลือ)/u;
+const PREPRINT_TEXT_RE =
+  /(?:พรีปรินต์|preprint|ยังไม่ผ่าน(?:การ)?รีวิว|ยังไม่ผ่าน\s*peer\s*review|บน\s*arxiv|จาก\s*arxiv|เผยแพร่บน\s*arxiv)/i;
+
+const CODE_HOST_DOMAINS = new Set([
+  'github.com',
+  'huggingface.co',
+  'gitlab.com',
+]);
+
+function isCodeRepoSource(src: SourceUrlItem): boolean {
+  try {
+    const host = new URL(src.url).hostname.toLowerCase().replace(/^www\./, '');
+    return CODE_HOST_DOMAINS.has(host);
+  } catch {
+    return false;
+  }
+}
 
 export function isPreprintSource(src: SourceUrlItem): boolean {
   const titleLower = (src.title ?? '').toLowerCase();
@@ -159,8 +176,11 @@ export function isPreprintSource(src: SourceUrlItem): boolean {
       host === 'arxiv.org' ||
       host.endsWith('.arxiv.org') ||
       host === 'biorxiv.org' ||
+      host.endsWith('.biorxiv.org') ||
       host === 'medrxiv.org' ||
-      host === 'openreview.net'
+      host.endsWith('.medrxiv.org') ||
+      host === 'openreview.net' ||
+      host.endsWith('.openreview.net')
     );
   } catch {
     return false;
@@ -177,26 +197,38 @@ export function getNewsTrustInfo(item: NewsItem): TrustBadgeInfo {
     };
   }
 
-  const hasCompanyOfficial = item.source_urls.some(
+  const hasLabOfficialAnnouncement = item.source_urls.some(
+    (s) => s.is_official && !isPreprintSource(s) && !isCodeRepoSource(s)
+  );
+  const hasPreprintUrl = item.source_urls.some((s) => isPreprintSource(s));
+  const fullTextScan = [
+    item.title_th ?? '',
+    item.tldr_th ?? '',
+    ...(item.summary_bullets ?? []).slice(0, 2),
+  ].join(' ');
+  const mentionsPreprint = PREPRINT_TEXT_RE.test(fullTextScan);
+
+  // Research preprints (by URL or explicit preprint/ArXiv text without official lab announcement)
+  // consistently receive an explicit un-peer-reviewed preprint badge across cards & reader modal.
+  if (!hasLabOfficialAnnouncement && (hasPreprintUrl || mentionsPreprint)) {
+    return {
+      tier: 'preprint',
+      shortLabel: 'พรีปรินต์ ArXiv · ยังไม่ผ่าน Peer Review',
+      fullLabel: 'พรีปรินต์บน ArXiv · ยังไม่ผ่าน Peer Review',
+      tooltip:
+        'งานวิจัยพรีปรินต์บน ArXiv เผยแพร่โดยผู้วิจัยโดยตรง ยังไม่ผ่านการตรวจสอบโดยผู้เชี่ยวชาญ (Peer Review)',
+    };
+  }
+
+  const hasAnyOfficial = item.source_urls.some(
     (s) => s.is_official && !isPreprintSource(s)
   );
-  if (hasCompanyOfficial) {
+  if (hasAnyOfficial) {
     return {
       tier: 'official',
       shortLabel: 'ยืนยันทางการ',
       fullLabel: 'ยืนยันจากแหล่งข่าวทางการ',
       tooltip: 'อ้างอิงโดยตรงจากประกาศทางการของบริษัทหรือหน่วยงานที่เกี่ยวข้อง',
-    };
-  }
-
-  const hasPreprint = item.source_urls.some((s) => isPreprintSource(s));
-  if (hasPreprint) {
-    return {
-      tier: 'preprint',
-      shortLabel: 'พรีปรินต์ ArXiv',
-      fullLabel: 'เอกสารวิจัยต้นฉบับ (ArXiv พรีปรินต์)',
-      tooltip:
-        'งานวิจัยต้นฉบับบน ArXiv (พรีปรินต์ — เผยแพร่โดยผู้วิจัยโดยตรง อาจยังไม่ผ่านการตรวจสอบโดยผู้เชี่ยวชาญ)',
     };
   }
 

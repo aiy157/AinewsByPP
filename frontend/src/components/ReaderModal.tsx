@@ -340,6 +340,7 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
               </span>
             ) : (
               <span
+                data-trust-tier={trustInfo.tier}
                 title={trustInfo.tooltip}
                 className="inline-flex items-center gap-1.5 font-semibold min-w-0"
               >
@@ -353,6 +354,11 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
                   <Newspaper className="w-3.5 h-3.5 shrink-0 text-ink-muted" />
                 )}
                 <span className="text-editorial truncate">{categoryLabel}</span>
+                {trustInfo.tier === 'preprint' && (
+                  <span className="hidden md:inline-flex items-center px-2 py-0.5 rounded-full border border-editorial/25 bg-editorial-soft text-editorial text-[10.5px] font-semibold shrink-0">
+                    {trustInfo.shortLabel}
+                  </span>
+                )}
               </span>
             )}
           </div>

@@ -7,10 +7,11 @@ interface TabNavigationProps {
   onSelectTab: (tab: PageTabId) => void;
   counts: Record<PageTabId, number>;
   loading?: boolean;
+  countScopeNote?: string;
 }
 
-const VERIFIED_TABS: Array<{ id: PageTabId; label: string; title?: string }> = [
-  { id: 'overview', label: 'รวมทุกหมวด', title: 'รวมข่าวทุกหมวดหมู่ทั้งหมดในช่วงที่เลือก' },
+const VERIFIED_TABS: Array<{ id: PageTabId; label: string }> = [
+  { id: 'overview', label: 'รวมทุกหมวด' },
   { id: 'models_updates', label: 'โมเดล & ระบบ' },
   { id: 'benchmarks_testing', label: 'ผลทดสอบ & วิจัย' },
   { id: 'partnerships_deals', label: 'ดีล & การลงทุน' },
@@ -22,6 +23,7 @@ export const TabNavigation: React.FC<TabNavigationProps> = ({
   onSelectTab,
   counts,
   loading = false,
+  countScopeNote = 'ยอดรายหมวดของฉบับนี้',
 }) => {
   const isRumorActive = activeTab === 'rumor_radar';
   const navRef = useRef<HTMLElement | null>(null);
@@ -57,11 +59,13 @@ export const TabNavigation: React.FC<TabNavigationProps> = ({
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           {VERIFIED_TABS.map((tab) => {
             const isActive = activeTab === tab.id;
+            const tabCount = counts[tab.id] ?? 0;
+            const tabTooltip = `${tab.label}: ${tabCount} ข่าว (${countScopeNote})`;
             return (
               <button
                 key={tab.id}
                 type="button"
-                title={tab.title}
+                title={tabTooltip}
                 aria-current={isActive ? 'page' : undefined}
                 onClick={() => onSelectTab(tab.id)}
                 className={`relative h-12 px-2.5 sm:px-3.5 inline-flex items-center gap-2 text-sm whitespace-nowrap transition-colors ${
@@ -78,13 +82,14 @@ export const TabNavigation: React.FC<TabNavigationProps> = ({
                   />
                 ) : (
                   <span
+                    title={tabTooltip}
                     className={`text-[11px] tabular-nums px-1.5 py-0.5 rounded-full ${
                       isActive
-                        ? 'bg-subtle text-ink-primary font-semibold'
+                        ? 'bg-editorial text-white dark:text-slate-950 font-semibold'
                         : 'text-ink-muted'
                     }`}
                   >
-                    {counts[tab.id] ?? 0}
+                    {tabCount}
                   </span>
                 )}
                 {isActive && (
@@ -95,34 +100,45 @@ export const TabNavigation: React.FC<TabNavigationProps> = ({
           })}
         </div>
 
-        {/* Right: Strictly Separated Rumor Radar Tab */}
-        <div className="flex items-center pl-3 border-l border-rule shrink-0">
-          <button
-            type="button"
-            aria-current={isRumorActive ? 'page' : undefined}
-            onClick={() => onSelectTab('rumor_radar')}
-            className={`relative h-12 px-3 inline-flex items-center gap-2 text-sm whitespace-nowrap transition-colors ${
-              isRumorActive
-                ? 'font-bold text-rumor'
-                : 'font-semibold text-rumor/85 hover:text-rumor'
-            }`}
-          >
-            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-            <span>Rumor Radar</span>
-            {loading ? (
-              <span
-                aria-hidden="true"
-                className="w-4 h-3.5 rounded-full bg-rumor-soft animate-pulse"
-              />
-            ) : (
-              <span className="text-[11px] tabular-nums px-1.5 py-0.5 rounded-full bg-rumor-soft text-rumor font-bold">
-                {counts.rumor_radar ?? 0}
-              </span>
-            )}
-            {isRumorActive && (
-              <span className="absolute bottom-0 left-2 right-2 h-[2px] bg-rumor rounded-full" />
-            )}
-          </button>
+        {/* Right: Scope Hint + Strictly Separated Rumor Radar Tab */}
+        <div className="flex items-center gap-3 shrink-0">
+          {!loading && (
+            <span
+              title="ตัวเลขบนแต่ละแท็บแสดงยอดข่าวรายหมวดภายใต้ฉบับและตัวกรองค่าย/คำค้นหาปัจจุบัน เพื่อให้สลับดูหมวดอื่นได้สะดวก"
+              className="hidden lg:inline text-[11px] text-ink-muted whitespace-nowrap"
+            >
+              {`ตัวเลขแท็บ = ${countScopeNote}`}
+            </span>
+          )}
+          <div className="flex items-center pl-3 border-l border-rule shrink-0">
+            <button
+              type="button"
+              title={`Rumor Radar: ${counts.rumor_radar ?? 0} ประเด็น (${countScopeNote})`}
+              aria-current={isRumorActive ? 'page' : undefined}
+              onClick={() => onSelectTab('rumor_radar')}
+              className={`relative h-12 px-3 inline-flex items-center gap-2 text-sm whitespace-nowrap transition-colors ${
+                isRumorActive
+                  ? 'font-bold text-rumor'
+                  : 'font-semibold text-rumor/85 hover:text-rumor'
+              }`}
+            >
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              <span>Rumor Radar</span>
+              {loading ? (
+                <span
+                  aria-hidden="true"
+                  className="w-4 h-3.5 rounded-full bg-rumor-soft animate-pulse"
+                />
+              ) : (
+                <span className="text-[11px] tabular-nums px-1.5 py-0.5 rounded-full bg-rumor-soft text-rumor font-bold">
+                  {counts.rumor_radar ?? 0}
+                </span>
+              )}
+              {isRumorActive && (
+                <span className="absolute bottom-0 left-2 right-2 h-[2px] bg-rumor rounded-full" />
+              )}
+            </button>
+          </div>
         </div>
       </nav>
 
